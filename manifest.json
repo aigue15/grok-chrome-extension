@@ -1,0 +1,114 @@
+{
+  "manifest_version": 3,
+  "name": "Grok",
+  "version": "1.0.85",
+  "description": "Grok in Chrome — SuperGrok / X Premium+ via Hermes-style web OAuth",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "128": "icon-128.png"
+  },
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Grok"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "options_page": "options.html",
+  "permissions": [
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "scripting",
+    "debugger",
+    "tabGroups",
+    "tabs",
+    "alarms",
+    "notifications",
+    "webNavigation",
+    "declarativeNetRequestWithHostAccess",
+    "offscreen",
+    "unlimitedStorage",
+    "downloads",
+    "identity"
+  ],
+  "host_permissions": [
+    "<all_urls>",
+    "https://auth.x.ai/*",
+    "https://accounts.x.ai/*",
+    "https://api.x.ai/*"
+  ],
+  "storage": {
+    "managed_schema": "managed_schema.json"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "assets/content-script.ts-loader-Dd0kPPVP.js"
+      ],
+      "matches": [
+        "https://claude.ai/*",
+        "https://*.claude.ai/*"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "js": [
+        "assets/accessibility-tree.js-B-oUarrX.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "js": [
+        "assets/agent-visual-indicator.js-CwioqiOd.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "commands": {
+    "toggle-side-panel": {
+      "suggested_key": {
+        "default": "Ctrl+E",
+        "mac": "Command+E"
+      },
+      "description": "Toggle Grok side panel"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.x.ai https://auth.x.ai https://accounts.x.ai https://api.anthropic.com wss://api.anthropic.com https://claude.ai https://platform.claude.com https://api.segment.io https://*.segment.com https://cdn.segment.com https://*.ingest.us.sentry.io https://api.honeycomb.io https://browser-intake-us5-datadoghq.com https://*.datadoghq.com wss://bridge.claudeusercontent.com wss://bridge-staging.claudeusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+  },
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://*.claude.ai/*",
+        "https://claude.ai/*"
+      ],
+      "resources": [
+        "assets/onboarding-prompts-CJtFEMjA.js",
+        "assets/content-script.ts-D0rMrCjG.js"
+      ],
+      "use_dynamic_url": false
+    },
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/accessibility-tree.js-B-oUarrX.js",
+        "assets/agent-visual-indicator.js-CwioqiOd.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}
