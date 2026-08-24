@@ -15,19 +15,22 @@ const XAI_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
 const META_API_BASE = "https://api.meta.ai/v1";
 const META_API_KEY = "metaApiKey";
+const HIDDEN_MODELS_KEY = "hiddenModels";
 const META_DASHBOARD_URL = "https://dev.meta.ai/";
 const MUSE_MODEL_ID = "muse-spark-1.2-contributor";
 const MUSE_MODEL_NAME = "Muse Spark 1.2 Contributor";
 const MUSE_SEND_BUDGET = 800_000;
 
 const MODELS = [
-  { id: "grok-4.6", name: "Grok 4.6" },
-  { id: "grok-4.5", name: "Grok 4.5" },
-  { id: "grok-4.3", name: "Grok 4.3" },
-  { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning" },
-  { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
-  { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
-  { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME },
+  { id: "grok-4.6", name: "Grok 4.6", provider: "xai" },
+  { id: "grok-4.5", name: "Grok 4.5", provider: "xai" },
+  { id: "grok-4.3", name: "Grok 4.3", provider: "xai" },
+  { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning", provider: "xai" },
+  { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning", provider: "xai" },
+  { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent", provider: "xai" },
+  { id: "muse-spark-1.2", name: "Muse Spark 1.2", provider: "meta", note: "Standard tier. Prompts are not used to train Meta models." },
+  { id: "muse-spark-1.1", name: "Muse Spark 1.1", provider: "meta", note: "Standard tier. Prompts are not used to train Meta models." },
+  { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME, provider: "meta", note: "Contributor tier. Prompts and completions may train future Meta models." },
 ];
 const DEFAULT_MODEL = "grok-4.6";
 const COMPRESS_MODEL = "grok-4.20-0309-non-reasoning";
@@ -198,6 +201,75 @@ function isMuseModel(model) {
   return String(model || "").toLowerCase().includes("muse");
 }
 
+let hiddenModelIds = [];
+
+function getVisibleModels() {
+  const hidden = new Set(hiddenModelIds.map((id) => String(id)));
+  const visible = MODELS.filter((model) => !hidden.has(model.id));
+  return visible.length ? visible : MODELS.slice(0, 1);
+}
+
+function buildGrokFeatures() {
+  const visible = getVisibleModels();
+  const defaultId = visible.some((model) => model.id === DEFAULT_MODEL)
+    ? DEFAULT_MODEL
+    : visible[0].id;
+  const smallFast = visible.some((model) => model.id === "grok-4.5")
+    ? "grok-4.5"
+    : visible[0].id;
+  const features = {
+    ...GROK_FEATURES,
+    features: {
+      ...GROK_FEATURES.features,
+      chrome_ext_models: {
+        on: true,
+        value: {
+          default: defaultId,
+          small_fast_model: smallFast,
+          options: visible.map((model) => ({
+            model: model.id,
+            name: model.name,
+          })),
+        },
+      },
+    },
+  };
+  return features;
+}
+
+function publishFeatureValues(features = buildGrokFeatures()) {
+  globalThis.__GROK_FEATURE_VALUES = Object.fromEntries(
+    Object.entries(features.features).map(([key, feature]) => [key, feature.value]),
+  );
+  chrome.storage.local
+    .set({
+      features: {
+        payload: features,
+        timestamp: Date.now(),
+      },
+    })
+    .catch(() => {});
+}
+
+async function loadHiddenModels() {
+  const stored = await storageGet([HIDDEN_MODELS_KEY]);
+  const raw = stored[HIDDEN_MODELS_KEY];
+  hiddenModelIds = Array.isArray(raw) ? raw.map(String) : [];
+  publishFeatureValues();
+}
+
+async function setModelHidden(modelId, hidden) {
+  const next = new Set(hiddenModelIds);
+  if (hidden) next.add(modelId);
+  else next.delete(modelId);
+  if (next.size >= MODELS.length) {
+    throw new Error("Keep at least one model visible.");
+  }
+  hiddenModelIds = [...next];
+  await storageSet({ [HIDDEN_MODELS_KEY]: hiddenModelIds });
+  publishFeatureValues();
+}
+
 async function getMetaApiKey() {
   try {
     const managed = await chrome.storage?.managed?.get?.(META_API_KEY);
@@ -214,7 +286,12 @@ async function getMetaApiKey() {
 function mapModel(model) {
   const raw = String(model || "").toLowerCase();
   if (MODELS.some((entry) => entry.id === raw)) return raw;
-  if (isMuseModel(raw)) return MUSE_MODEL_ID;
+  if (isMuseModel(raw)) {
+    const matches = MODELS.filter(
+      (entry) => entry.provider === "meta" && raw.includes(entry.id),
+    ).sort((a, b) => b.id.length - a.id.length);
+    return matches[0]?.id || MUSE_MODEL_ID;
+  }
   if (raw.includes("multi-agent") || raw.includes("grok-4.20-multi")) {
     return "grok-4.20-multi-agent-0309";
   }
@@ -426,7 +503,7 @@ async function runDeviceLogin() {
 }
 
 function grokFeatures() {
-  return GROK_FEATURES;
+  return buildGrokFeatures();
 }
 
 function museProfile(uuid) {
@@ -1003,7 +1080,7 @@ async function proxyMessages(init) {
           error: {
             type: "authentication_error",
             message:
-              "Add a Meta Model API key in extension settings to use Muse Spark 1.2 Contributor.",
+              "Add a Meta Model API key in Settings → Models to use a Muse model.",
           },
         },
         401,
@@ -1146,6 +1223,7 @@ async function handleAnthropic(url, init) {
   }
 
   if (path.includes("/api/bootstrap/features/")) {
+    await loadHiddenModels();
     return jsonResponse(grokFeatures());
   }
 
@@ -1158,8 +1236,9 @@ async function handleAnthropic(url, init) {
   }
 
   if (path.includes("/v1/models")) {
+    await loadHiddenModels();
     return jsonResponse({
-      data: MODELS.map((model) => ({
+      data: getVisibleModels().map((model) => ({
         id: model.id,
         display_name: model.name,
         type: "model",
@@ -1506,57 +1585,110 @@ function maskApiKey(key) {
   return `${value.slice(0, 6)}••••${value.slice(-4)}`;
 }
 
-function mountMetaSettingsPanel() {
+function mountModelsSettings() {
   if (typeof document === "undefined" || typeof location === "undefined") return;
   if (!/options\.html$/i.test(location.pathname || "")) return;
 
-  const PANEL_ID = "meta-api-settings";
+  const NAV_ID = "grok-models-nav";
+  const PANEL_ID = "grok-models-panel";
+  const NAV_IDLE =
+    "block w-full text-left whitespace-nowrap transition-all ease-in-out active:scale-95 cursor-pointer font-base rounded-lg px-3 py-3 text-text-200 hover:bg-bg-200 hover:text-text-100";
+  const NAV_ACTIVE =
+    "block w-full text-left whitespace-nowrap transition-all ease-in-out active:scale-95 cursor-pointer font-base rounded-lg px-3 py-3 bg-bg-300 font-medium text-text-000";
 
-  const ensurePanel = () => {
-    if (document.getElementById(PANEL_ID)) return;
-    const host = document.getElementById("meta-api-settings-host") || document.body;
-    const panel = document.createElement("section");
-    panel.id = PANEL_ID;
-    panel.className = "px-6 pt-6";
-    panel.innerHTML = `
-      <div class="max-w-2xl mx-auto">
-        <h2 class="text-text-100 font-xl-bold">Meta Model API</h2>
-        <p class="text-text-300 font-base mt-2 mb-6">
-          Optional. Paste a key from the
-          <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>
-          to use <strong>Muse Spark 1.2 Contributor</strong> in the model picker.
-          Contributor-tier prompts and completions may be used to train future Meta models.
-        </p>
-        <label class="font-semibold text-text-200" for="meta-api-key-input">API key</label>
-        <input
-          id="meta-api-key-input"
-          type="password"
-          autocomplete="off"
-          spellcheck="false"
-          placeholder="LLM|…|…"
-          class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
-        />
-        <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
-        <div class="flex items-center gap-3 mt-4 mb-6">
-          <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Save key</button>
-          <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
-          <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
+  const modelRow = (model) => {
+    const hidden = hiddenModelIds.includes(model.id);
+    return `
+      <div class="flex items-start justify-between gap-4 py-4 border-b border-border-400 last:border-b-0" data-model-id="${model.id}">
+        <div class="flex-1 min-w-0">
+          <div class="font-large text-text-100">${model.name}</div>
+          <div class="text-text-400 font-base-sm mt-1">${model.id}</div>
+          ${model.note ? `<div class="text-text-400 font-base-sm mt-1">${model.note}</div>` : ""}
         </div>
+        <label class="flex items-center gap-2 shrink-0 text-text-200 font-base-sm">
+          <input type="checkbox" data-hide-model="${model.id}" ${hidden ? "" : "checked"} />
+          Show
+        </label>
       </div>
     `;
-    host.prepend(panel);
+  };
 
+  const panelHtml = () => `
+    <h2 class="text-text-100 font-xl-bold">Models</h2>
+    <p class="text-text-300 font-base mt-2 mb-6">
+      Choose which models appear in the side-panel picker. Meta models need a key from the
+      <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>.
+    </p>
+    <h3 class="text-text-100 font-xl-bold">Meta Model API</h3>
+    <p class="text-text-300 font-base mt-2 mb-4">
+      Used for Muse Spark 1.1, Muse Spark 1.2, and Muse Spark 1.2 Contributor.
+    </p>
+    <label class="font-semibold text-text-200" for="meta-api-key-input">API key</label>
+    <input
+      id="meta-api-key-input"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="LLM|…|…"
+      class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
+    />
+    <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
+    <div class="flex items-center gap-3 mt-4 mb-8">
+      <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Save key</button>
+      <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
+      <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
+    </div>
+    <h3 class="text-text-100 font-xl-bold">Grok</h3>
+    <p class="text-text-300 font-base mt-2 mb-2">Uses your Grok sign-in.</p>
+    <div id="grok-model-list">${MODELS.filter((model) => model.provider === "xai").map(modelRow).join("")}</div>
+    <h3 class="text-text-100 font-xl-bold mt-8">Meta</h3>
+    <p class="text-text-300 font-base mt-2 mb-2">Uses the Meta Model API key above.</p>
+    <div id="meta-model-list">${MODELS.filter((model) => model.provider === "meta").map(modelRow).join("")}</div>
+  `;
+
+  const nativeNavButtons = (ul) =>
+    [...ul.querySelectorAll("li > button")].filter((button) => button.id !== `${NAV_ID}-btn`);
+
+  const setNativeActive = (ul, active) => {
+    for (const button of nativeNavButtons(ul)) {
+      button.className = active ? NAV_IDLE : button.className;
+      if (active) button.className = NAV_IDLE;
+    }
+  };
+
+  const showModels = (grid, ul) => {
+    const panel = document.getElementById(PANEL_ID);
+    const native = [...grid.children].find((child) => child.id !== PANEL_ID && child.tagName !== "NAV");
+    if (native) native.style.display = "none";
+    if (panel) panel.style.display = "";
+    const btn = document.getElementById(`${NAV_ID}-btn`);
+    if (btn) btn.className = NAV_ACTIVE;
+    setNativeActive(ul, true);
+  };
+
+  const hideModels = (grid, ul) => {
+    const panel = document.getElementById(PANEL_ID);
+    const native = [...grid.children].find((child) => child.id !== PANEL_ID && child.tagName !== "NAV");
+    if (native) native.style.display = "";
+    if (panel) panel.style.display = "none";
+    const btn = document.getElementById(`${NAV_ID}-btn`);
+    if (btn) btn.className = NAV_IDLE;
+  };
+
+  const bindKeyControls = (panel) => {
+    if (panel.dataset.bound === "1") return;
+    panel.dataset.bound = "1";
     const input = panel.querySelector("#meta-api-key-input");
     const status = panel.querySelector("#meta-api-key-status");
     const save = panel.querySelector("#meta-api-key-save");
     const clear = panel.querySelector("#meta-api-key-clear");
     const test = panel.querySelector("#meta-api-key-test");
-
     const setStatus = (text) => {
       if (status) status.textContent = text;
     };
 
     const refresh = async () => {
+      await loadHiddenModels();
       const { key, source } = await getMetaApiKey();
       if (source === "managed") {
         if (input) {
@@ -1566,16 +1698,19 @@ function mountMetaSettingsPanel() {
         if (save) save.disabled = true;
         if (clear) clear.disabled = true;
         setStatus("This key is set by organization policy and cannot be edited here.");
-        return;
+      } else {
+        if (input) {
+          input.disabled = false;
+          input.value = "";
+          input.placeholder = key ? maskApiKey(key) : "LLM|…|…";
+        }
+        if (save) save.disabled = false;
+        if (clear) clear.disabled = !key;
+        setStatus(key ? `Saved locally. Current key: ${maskApiKey(key)}` : "No Meta API key saved.");
       }
-      if (input) {
-        input.disabled = false;
-        input.value = "";
-        input.placeholder = key ? maskApiKey(key) : "LLM|…|…";
+      for (const box of panel.querySelectorAll("[data-hide-model]")) {
+        box.checked = !hiddenModelIds.includes(box.getAttribute("data-hide-model"));
       }
-      if (save) save.disabled = false;
-      if (clear) clear.disabled = !key;
-      setStatus(key ? `Saved locally. Current key: ${maskApiKey(key)}` : "No Meta API key saved.");
     };
 
     save?.addEventListener("click", async () => {
@@ -1618,25 +1753,97 @@ function mountMetaSettingsPanel() {
         }
         const json = await res.json();
         const ids = (json.data || json.models || []).map((entry) => entry.id || entry).filter(Boolean);
-        const hasMuse = ids.some((id) => String(id).includes(MUSE_MODEL_ID));
+        const museIds = MODELS.filter((model) => model.provider === "meta").map((model) => model.id);
+        const found = museIds.filter((id) => ids.some((entry) => String(entry).includes(id)));
         setStatus(
-          hasMuse
-            ? "Key works. Muse Spark 1.2 Contributor is available."
-            : "Key works. You can select Muse Spark 1.2 Contributor in the side panel.",
+          found.length
+            ? `Key works. Available: ${found.map((id) => MODELS.find((model) => model.id === id)?.name || id).join(", ")}.`
+            : "Key works. You can select Muse models in the side panel.",
         );
       } catch (error) {
         setStatus(`Could not reach Meta Model API: ${error.message || error}`);
       }
     });
 
+    panel.addEventListener("change", async (event) => {
+      const box = event.target;
+      if (!(box instanceof HTMLInputElement) || !box.hasAttribute("data-hide-model")) return;
+      try {
+        await setModelHidden(box.getAttribute("data-hide-model"), !box.checked);
+      } catch (error) {
+        box.checked = true;
+        setStatus(String(error.message || error));
+      }
+    });
+
     refresh().catch(() => {});
   };
 
+  const mountStandalone = () => {
+    if (document.getElementById(PANEL_ID) || document.querySelector("nav ul")) return;
+    const host = document.getElementById("root") || document.body;
+    const panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    panel.className = "w-full max-w-6xl my-8 px-4";
+    panel.innerHTML = panelHtml();
+    host.appendChild(panel);
+    bindKeyControls(panel);
+  };
+
+  const ensure = () => {
+    const ul = document.querySelector("nav ul");
+    const nav = ul?.closest("nav");
+    const grid = nav?.parentElement;
+    if (!ul || !grid) {
+      if (document.readyState === "complete") mountStandalone();
+      return;
+    }
+    const standalone = document.getElementById(PANEL_ID);
+    if (standalone && standalone.parentElement !== grid) standalone.remove();
+
+    if (!document.getElementById(NAV_ID)) {
+      const li = document.createElement("li");
+      li.id = NAV_ID;
+      const button = document.createElement("button");
+      button.id = `${NAV_ID}-btn`;
+      button.type = "button";
+      button.className = NAV_IDLE;
+      button.textContent = "Models";
+      li.appendChild(button);
+      const first = ul.querySelector("li");
+      if (first?.nextSibling) ul.insertBefore(li, first.nextSibling);
+      else ul.appendChild(li);
+      button.addEventListener("click", () => showModels(grid, ul));
+      for (const native of nativeNavButtons(ul)) {
+        if (native.dataset.grokBound === "1") continue;
+        native.dataset.grokBound = "1";
+        native.addEventListener("click", () => hideModels(grid, ul));
+      }
+    }
+
+    if (!document.getElementById(PANEL_ID)) {
+      const panel = document.createElement("div");
+      panel.id = PANEL_ID;
+      panel.style.display = "none";
+      panel.innerHTML = panelHtml();
+      grid.appendChild(panel);
+      bindKeyControls(panel);
+    }
+  };
+
+  const start = () => {
+    loadHiddenModels().catch(() => {});
+    ensure();
+    const observer = new MutationObserver(() => ensure());
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", ensurePanel, { once: true });
+    document.addEventListener("DOMContentLoaded", start, { once: true });
   } else {
-    ensurePanel();
+    start();
   }
 }
 
-mountMetaSettingsPanel();
+loadHiddenModels().catch(() => {});
+mountModelsSettings();

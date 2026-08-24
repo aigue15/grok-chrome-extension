@@ -23,13 +23,17 @@ Click **Log in** in the side panel. Chrome opens an xAI / accounts.x.ai page. Ap
 - **Grok 4.2 Reasoning** (`grok-4.20-0309-reasoning`)
 - **Grok 4.2 Non-reasoning** (`grok-4.20-0309-non-reasoning`)
 - **Grok 4.2 Multi-agent** (`grok-4.20-multi-agent-0309`)
-- **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — Meta Model API key required
+- **Muse Spark 1.2** (`muse-spark-1.2`) — Meta Model API key; standard tier
+- **Muse Spark 1.1** (`muse-spark-1.1`) — Meta Model API key; standard tier
+- **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — Meta Model API key; may train future Meta models
+
+Hide models from the picker in **chrome://extensions → Grok for Chrome → Extension options → Models**.
 
 Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**. Muse uses Meta's 1M-token context and local clipping instead.
 
 ## Meta Muse API key
 
-Muse Spark 1.2 Contributor talks to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open **chrome://extensions → Grok for Chrome → Details → Extension options** and paste the key there. Enterprise admins can also set the `metaApiKey` managed-policy field.
+Muse models talk to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open **chrome://extensions → Grok for Chrome → Details → Extension options → Models** and paste the key there. Enterprise admins can also set the `metaApiKey` managed-policy field.
 
 Contributor-tier prompts and completions may be used to train future Meta models. Grok sign-in is unchanged and still used for every Grok model.
 
