@@ -15,6 +15,7 @@ const XAI_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
 const META_API_BASE = "https://api.meta.ai/v1";
 const META_API_KEY = "metaApiKey";
+const META_ADDON_KEY = "metaAddonEnabled";
 const HIDDEN_MODELS_KEY = "hiddenModels";
 const META_DASHBOARD_URL = "https://dev.meta.ai/";
 const MUSE_MODEL_ID = "muse-spark-1.2-contributor";
@@ -1654,37 +1655,56 @@ function mountModelsSettings() {
   const panelHtml = () => `
     <h2 class="text-text-100 font-xl-bold">Models</h2>
     <p class="text-text-300 font-base mt-2 mb-6">
-      The picker starts with Grok models. Save a Meta API key to unlock Muse Spark, then
-      choose which models appear in the side-panel picker. Get a key from the
-      <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>.
+      Choose which Grok models appear in the side-panel picker. These use your Grok sign-in.
     </p>
-    <h3 class="text-text-100 font-xl-bold">Meta Model API</h3>
-    <p class="text-text-300 font-base mt-2 mb-4">
-      Used for Muse Spark 1.1, Muse Spark 1.2, and Muse Spark 1.2 Contributor.
-    </p>
-    <label class="font-semibold text-text-200" for="meta-api-key-input">API key</label>
-    <input
-      id="meta-api-key-input"
-      type="password"
-      autocomplete="off"
-      spellcheck="false"
-      placeholder="LLM|…|…"
-      class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
-    />
-    <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
-    <div class="flex items-center gap-3 mt-4 mb-8">
-      <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Save key</button>
-      <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
-      <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
-    </div>
-    <h3 class="text-text-100 font-xl-bold">Grok</h3>
-    <p class="text-text-300 font-base mt-2 mb-2">Uses your Grok sign-in.</p>
     <div id="grok-model-list">${MODELS.filter((model) => model.provider === "xai").map(modelRow).join("")}</div>
-    <h3 class="text-text-100 font-xl-bold mt-8">Meta</h3>
-    <p class="text-text-300 font-base mt-2 mb-2" id="meta-models-help">
-      Save a Meta API key above to add these to the picker.
-    </p>
-    <div id="meta-model-list">${MODELS.filter((model) => model.provider === "meta").map(modelRow).join("")}</div>
+    <section id="grok-meta-addon" class="mt-10 pt-6 border-t border-border-400" data-enabled="0">
+      <div class="flex items-start justify-between gap-4">
+        <div class="min-w-0">
+          <p class="text-text-400 font-base-sm font-semibold tracking-wide uppercase">Optional add-on</p>
+          <h3 class="text-text-200 font-large mt-1">Meta Muse</h3>
+          <p id="meta-addon-teaser" class="text-text-400 font-base-sm mt-2">
+            Add Muse Spark models to this Grok extension. They stay off until you enable the add-on and save a key.
+          </p>
+        </div>
+        <button
+          id="meta-addon-enable"
+          type="button"
+          class="shrink-0 w-10 h-10 rounded-lg border border-border-300 hover:bg-bg-200 transition-colors text-text-100 font-xl-bold"
+          aria-label="Add Meta Muse add-on"
+          title="Add Meta Muse"
+        >+</button>
+      </div>
+      <div id="meta-addon-body" hidden>
+        <p class="text-text-400 font-base-sm mt-4 mb-4">
+          Not part of Grok. Get a key from the
+          <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>
+          to unlock Muse Spark 1.1, 1.2, and 1.2 Contributor.
+        </p>
+        <label class="font-semibold text-text-300" for="meta-api-key-input">API key</label>
+        <input
+          id="meta-api-key-input"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="LLM|…|…"
+          class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
+        />
+        <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
+        <div class="flex items-center gap-3 mt-4 mb-6">
+          <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Save key</button>
+          <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
+          <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
+        </div>
+        <p class="text-text-400 font-base-sm mb-2" id="meta-models-help">
+          Save a Meta API key above to add these to the picker.
+        </p>
+        <div id="meta-model-list">${MODELS.filter((model) => model.provider === "meta").map(modelRow).join("")}</div>
+        <button id="meta-addon-remove" type="button" class="mt-4 text-text-400 hover:text-text-100 font-base-sm">
+          Remove add-on
+        </button>
+      </div>
+    </section>
   `;
 
   const nativeNavButtons = (ul) =>
@@ -1721,6 +1741,11 @@ function mountModelsSettings() {
   const bindKeyControls = (panel) => {
     if (panel.dataset.bound === "1") return;
     panel.dataset.bound = "1";
+    const addon = panel.querySelector("#grok-meta-addon");
+    const addonBody = panel.querySelector("#meta-addon-body");
+    const addonTeaser = panel.querySelector("#meta-addon-teaser");
+    const enableAddon = panel.querySelector("#meta-addon-enable");
+    const removeAddon = panel.querySelector("#meta-addon-remove");
     const input = panel.querySelector("#meta-api-key-input");
     const status = panel.querySelector("#meta-api-key-status");
     const save = panel.querySelector("#meta-api-key-save");
@@ -1730,9 +1755,24 @@ function mountModelsSettings() {
       if (status) status.textContent = text;
     };
 
+    const setAddonOpen = (open) => {
+      if (addon) addon.dataset.enabled = open ? "1" : "0";
+      if (addonBody) addonBody.hidden = !open;
+      if (addonTeaser) addonTeaser.hidden = open;
+      if (enableAddon) enableAddon.hidden = open;
+    };
+
+    const isAddonEnabled = async (key) => {
+      if (key) return true;
+      const stored = await storageGet([META_ADDON_KEY]);
+      return stored[META_ADDON_KEY] === true;
+    };
+
     const refresh = async () => {
       await loadHiddenModels();
       const { key, source } = await getMetaApiKey();
+      setAddonOpen(await isAddonEnabled(key));
+      if (removeAddon) removeAddon.hidden = source === "managed";
       if (source === "managed") {
         if (input) {
           input.value = key;
@@ -1768,6 +1808,23 @@ function mountModelsSettings() {
         if (model?.provider === "meta") box.disabled = !key;
       }
     };
+
+    enableAddon?.addEventListener("click", async () => {
+      await storageSet({ [META_ADDON_KEY]: true });
+      setAddonOpen(true);
+      setStatus("Add-on enabled. Paste a Meta API key to unlock Muse models.");
+      input?.focus();
+    });
+
+    removeAddon?.addEventListener("click", async () => {
+      await chrome.storage.local.remove([META_API_KEY, META_ADDON_KEY]);
+      if (chrome.storage?.session) {
+        await chrome.storage.session.remove([META_API_KEY, META_ADDON_KEY]).catch(() => {});
+      }
+      if (input) input.value = "";
+      await loadHiddenModels();
+      setAddonOpen(false);
+    });
 
     save?.addEventListener("click", async () => {
       const next = String(input?.value || "").trim();
