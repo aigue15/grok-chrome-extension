@@ -17,25 +17,26 @@ Click **Log in** in the side panel. Chrome opens an xAI / accounts.x.ai page. Ap
 
 ## Models
 
+The Models page is for Grok. Hide or show these in **chrome://extensions → Grok for Chrome → Extension options → Models**:
+
 - **Grok 4.6** (default)
 - **Grok 4.5**
 - **Grok 4.3**
 - **Grok 4.2 Reasoning** (`grok-4.20-0309-reasoning`)
 - **Grok 4.2 Non-reasoning** (`grok-4.20-0309-non-reasoning`)
 - **Grok 4.2 Multi-agent** (`grok-4.20-multi-agent-0309`)
-The picker starts with Grok models only. After you save a Meta Model API key, these appear too:
+
+Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**.
+
+## Optional add-on: Meta Muse
+
+Meta is a collapsed add-on at the bottom of Models. Click **+** to enable it, then save a key to put these in the picker:
 
 - **Muse Spark 1.2** (`muse-spark-1.2`) — standard tier
 - **Muse Spark 1.1** (`muse-spark-1.1`) — standard tier
 - **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — may train future Meta models
 
-Hide models from the picker in **chrome://extensions → Grok for Chrome → Extension options → Models**. Clearing the Meta key hides Muse models again.
-
-Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**. Muse uses Meta's 1M-token context and local clipping instead.
-
-## Meta Muse API key
-
-Muse models talk to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open **chrome://extensions → Grok for Chrome → Details → Extension options → Models** and paste the key there — that is what unlocks them in the picker. Enterprise admins can also set the `metaApiKey` managed-policy field.
+Muse models talk to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Clearing the key hides them again. Enterprise admins can also set the `metaApiKey` managed-policy field.
 
 Contributor-tier prompts and completions may be used to train future Meta models. Grok sign-in is unchanged and still used for every Grok model.
 
