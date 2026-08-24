@@ -32,12 +32,63 @@ const CURSOR_API_EXPIRES = "cursorApiKeyExpiresAt";
 const CURSOR_PREFER_QUOTA = "cursorPreferQuota";
 const CURSOR_LOGIN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
 
-const CURSOR_MODELS = [
-  { id: "cursor-auto", name: "Cursor Auto", cursorId: "auto" },
-  { id: "cursor-auto-smart", name: "Cursor Auto (Smart)", cursorId: "auto-smart" },
-  { id: "cursor-composer-2", name: "Composer 2", cursorId: "composer-2" },
-  { id: "cursor-grok-4.6", name: "Cursor Grok 4.6", cursorId: "grok-4.6" },
+function cursorEntry(cursorId, name, extra = {}) {
+  return { id: `cursor-${cursorId}`, name, cursorId, ...extra };
+}
+
+const CURSOR_MODELS_FALLBACK = [
+  cursorEntry("auto", "Cursor Auto"),
+  cursorEntry("auto-smart", "Cursor Auto (Smart)", {
+    params: [{ id: "optimize_for", value: "balanced" }],
+  }),
+  cursorEntry("composer-2.5", "Composer 2.5"),
+  cursorEntry("composer-2", "Composer 2"),
+  cursorEntry("grok-4.6", "Cursor Grok 4.6"),
+  cursorEntry("grok-4.5", "Cursor Grok 4.5"),
+  cursorEntry("claude-sonnet-5", "Cursor · Claude Sonnet 5"),
+  cursorEntry("claude-opus-5", "Cursor · Claude Opus 5"),
+  cursorEntry("claude-fable-5", "Cursor · Claude Fable 5"),
+  cursorEntry("claude-opus-4-8", "Cursor · Claude Opus 4.8"),
+  cursorEntry("claude-opus-4-8-fast", "Cursor · Claude Opus 4.8 Fast"),
+  cursorEntry("claude-4.7-opus", "Cursor · Claude 4.7 Opus"),
+  cursorEntry("claude-4.7-opus-fast", "Cursor · Claude 4.7 Opus Fast"),
+  cursorEntry("claude-4.6-opus", "Cursor · Claude 4.6 Opus"),
+  cursorEntry("claude-4.6-sonnet", "Cursor · Claude 4.6 Sonnet"),
+  cursorEntry("claude-4.6-sonnet-thinking", "Cursor · Claude 4.6 Sonnet Thinking"),
+  cursorEntry("claude-4.5-opus", "Cursor · Claude 4.5 Opus"),
+  cursorEntry("claude-4.5-sonnet", "Cursor · Claude 4.5 Sonnet"),
+  cursorEntry("claude-4.5-haiku", "Cursor · Claude 4.5 Haiku"),
+  cursorEntry("claude-4-sonnet", "Cursor · Claude 4 Sonnet"),
+  cursorEntry("claude-4-sonnet-thinking", "Cursor · Claude 4 Sonnet Thinking"),
+  cursorEntry("gpt-5.6-sol", "Cursor · GPT-5.6 Sol"),
+  cursorEntry("gpt-5.6-terra", "Cursor · GPT-5.6 Terra"),
+  cursorEntry("gpt-5.6-luna", "Cursor · GPT-5.6 Luna"),
+  cursorEntry("gpt-5.5", "Cursor · GPT-5.5"),
+  cursorEntry("gpt-5.4", "Cursor · GPT-5.4"),
+  cursorEntry("gpt-5.4-mini", "Cursor · GPT-5.4 Mini"),
+  cursorEntry("gpt-5.4-nano", "Cursor · GPT-5.4 Nano"),
+  cursorEntry("gpt-5.3-codex", "Cursor · GPT-5.3 Codex"),
+  cursorEntry("gpt-5.2", "Cursor · GPT-5.2"),
+  cursorEntry("gpt-5.2-codex", "Cursor · GPT-5.2 Codex"),
+  cursorEntry("gpt-5.1-codex", "Cursor · GPT-5.1 Codex"),
+  cursorEntry("gpt-5.1-codex-max", "Cursor · GPT-5.1 Codex Max"),
+  cursorEntry("gpt-5.1-codex-mini", "Cursor · GPT-5.1 Codex Mini"),
+  cursorEntry("gpt-5", "Cursor · GPT-5"),
+  cursorEntry("gpt-5-codex", "Cursor · GPT-5 Codex"),
+  cursorEntry("gpt-5-mini", "Cursor · GPT-5 Mini"),
+  cursorEntry("gpt-5-fast", "Cursor · GPT-5 Fast"),
+  cursorEntry("gemini-3.7-flash", "Cursor · Gemini 3.7 Flash"),
+  cursorEntry("gemini-3.6-flash", "Cursor · Gemini 3.6 Flash"),
+  cursorEntry("gemini-3.5-flash", "Cursor · Gemini 3.5 Flash"),
+  cursorEntry("gemini-3.1-pro", "Cursor · Gemini 3.1 Pro"),
+  cursorEntry("gemini-3-pro", "Cursor · Gemini 3 Pro"),
+  cursorEntry("gemini-3-flash", "Cursor · Gemini 3 Flash"),
+  cursorEntry("gemini-2.5-flash", "Cursor · Gemini 2.5 Flash"),
+  cursorEntry("kimi-k3", "Cursor · Kimi K3"),
+  cursorEntry("kimi-k2.7-code", "Cursor · Kimi K2.7 Code"),
+  cursorEntry("glm-5.2", "Cursor · GLM 5.2"),
 ];
+let cursorModelCatalog = CURSOR_MODELS_FALLBACK.slice();
 
 const MODELS = [
   { id: "grok-4.6", name: "Grok 4.6" },
@@ -47,7 +98,7 @@ const MODELS = [
   { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
   { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
   { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME },
-  ...CURSOR_MODELS.map((model) => ({ id: model.id, name: model.name })),
+  ...cursorModelCatalog.map((model) => ({ id: model.id, name: model.name })),
 ];
 const DEFAULT_MODEL = "grok-4.6";
 const COMPRESS_MODEL = "grok-4.20-0309-non-reasoning";
@@ -245,14 +296,56 @@ function randomVerifier() {
 
 function isCursorModel(model) {
   const raw = String(model || "").toLowerCase();
-  return raw.startsWith("cursor-") || CURSOR_MODELS.some((entry) => entry.id === raw);
+  return raw.startsWith("cursor-") || cursorModelCatalog.some((entry) => entry.id === raw);
 }
 
 function cursorUpstreamId(model) {
+  return cursorModelConfig(model).id;
+}
+
+function cursorModelConfig(model) {
   const raw = String(model || "").toLowerCase();
-  const listed = CURSOR_MODELS.find((entry) => entry.id === raw);
-  if (listed) return listed.cursorId;
-  return raw.startsWith("cursor-") ? raw.slice("cursor-".length) : raw;
+  const listed = cursorModelCatalog.find((entry) => entry.id === raw);
+  if (listed) {
+    return { id: listed.cursorId, params: listed.params };
+  }
+  return { id: raw.startsWith("cursor-") ? raw.slice("cursor-".length) : raw };
+}
+
+function syncFeatureModels() {
+  const options = MODELS.map((model) => ({ model: model.id, name: model.name }));
+  if (GROK_FEATURES?.features?.chrome_ext_models?.value) {
+    GROK_FEATURES.features.chrome_ext_models.value.options = options;
+  }
+  if (globalThis.__GROK_FEATURE_VALUES?.chrome_ext_models) {
+    globalThis.__GROK_FEATURE_VALUES.chrome_ext_models.options = options;
+  }
+  chrome.storage?.local
+    ?.set?.({
+      features: {
+        payload: GROK_FEATURES,
+        timestamp: Date.now(),
+      },
+    })
+    .catch(() => {});
+}
+
+function rebuildModels(nextCursorModels) {
+  if (Array.isArray(nextCursorModels) && nextCursorModels.length) {
+    cursorModelCatalog = nextCursorModels;
+  }
+  const next = [
+    { id: "grok-4.6", name: "Grok 4.6" },
+    { id: "grok-4.5", name: "Grok 4.5" },
+    { id: "grok-4.3", name: "Grok 4.3" },
+    { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning" },
+    { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
+    { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
+    { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME },
+    ...cursorModelCatalog.map((model) => ({ id: model.id, name: model.name })),
+  ];
+  MODELS.splice(0, MODELS.length, ...next);
+  syncFeatureModels();
 }
 
 async function getCursorApiKey() {
@@ -276,6 +369,66 @@ async function getCursorApiKey() {
 async function getCursorPreferQuota() {
   const stored = await storageGet([CURSOR_PREFER_QUOTA]);
   return stored[CURSOR_PREFER_QUOTA] === true;
+}
+
+function catalogFromCursorApi(items) {
+  const next = [];
+  const seen = new Set();
+  const add = (entry) => {
+    if (!entry.cursorId || seen.has(entry.id)) return;
+    seen.add(entry.id);
+    next.push(entry);
+  };
+  for (const item of items) {
+    const cursorId = String(item.id || item.model || "").trim();
+    if (!cursorId) continue;
+    const display = String(item.displayName || item.name || cursorId).trim();
+    add({
+      id: cursorId.startsWith("cursor-") ? cursorId : `cursor-${cursorId}`,
+      name: display.toLowerCase().startsWith("cursor") ? display : `Cursor · ${display}`,
+      cursorId,
+    });
+    for (const variant of item.variants || []) {
+      const params = Array.isArray(variant.params) ? variant.params.filter((param) => param?.id) : [];
+      if (!params.length) continue;
+      const variantName = String(variant.displayName || "").trim();
+      const suffix = params
+        .map((param) => (param.value === "true" ? param.id : `${param.id}-${param.value}`))
+        .join("-");
+      add({
+        id: `cursor-${cursorId}-${suffix}`,
+        name: variantName ? `Cursor · ${variantName}` : `Cursor · ${display} (${suffix})`,
+        cursorId,
+        params,
+      });
+    }
+  }
+  return next;
+}
+
+async function refreshCursorModelCatalog() {
+  const { key } = await getCursorApiKey();
+  if (!key) {
+    rebuildModels(CURSOR_MODELS_FALLBACK.slice());
+    return { ok: true, source: "fallback", count: cursorModelCatalog.length };
+  }
+  try {
+    const res = await nativeFetch(`${CURSOR_API_BASE}/models`, {
+      headers: cursorAuthHeaders(key),
+    });
+    if (!res.ok) {
+      rebuildModels(CURSOR_MODELS_FALLBACK.slice());
+      return { ok: false, source: "fallback", status: res.status, count: cursorModelCatalog.length };
+    }
+    const json = await res.json();
+    const items = json.items || json.data || json.models || [];
+    const catalog = catalogFromCursorApi(items);
+    rebuildModels(catalog.length ? catalog : CURSOR_MODELS_FALLBACK.slice());
+    return { ok: true, source: catalog.length ? "cursor" : "fallback", count: cursorModelCatalog.length };
+  } catch (error) {
+    rebuildModels(CURSOR_MODELS_FALLBACK.slice());
+    return { ok: false, source: "fallback", error: String(error.message || error), count: cursorModelCatalog.length };
+  }
 }
 
 function cursorAuthHeaders(key) {
@@ -407,6 +560,7 @@ async function runCursorLogin() {
     [CURSOR_API_EMAIL]: email,
     [CURSOR_API_EXPIRES]: minted.expiresAtMs,
   });
+  await refreshCursorModelCatalog().catch(() => {});
   return { apiKey: minted.apiKey, email, apiKeyExpiresAtMs: minted.expiresAtMs };
 }
 
@@ -1411,13 +1565,15 @@ async function readCursorRunText(key, agentId, runId) {
 }
 
 async function proxyCursorMessages(body, model, key, stream) {
-  const cursorModel = cursorUpstreamId(model);
+  const selection = cursorModelConfig(model);
   const payload = {
     name: "Grok for Chrome",
     prompt: { text: conversationToCursorPrompt(body) },
-    model: { id: cursorModel },
+    model: { id: selection.id },
   };
-  if (cursorModel === "auto-smart") {
+  if (selection.params?.length) {
+    payload.model.params = selection.params;
+  } else if (selection.id === "auto-smart") {
     payload.model.params = [{ id: "optimize_for", value: "balanced" }];
   }
   const created = await nativeFetch(`${CURSOR_API_BASE}/agents`, {
@@ -2040,8 +2196,10 @@ function mountMetaSettingsPanel() {
         <h2 class="text-text-100 font-xl-bold">Cursor account</h2>
         <p class="text-text-300 font-base mt-2 mb-6">
           Sign in with Cursor (same browser OAuth the Cursor SDK / CLI uses) to bill selected models to your
-          Cursor Pro, Ultra, or Teams quota. You can also paste a user API key from the
+          Cursor Pro, Ultra, or Teams quota — including Claude, GPT, Gemini, Kimi, GLM, Composer, and Cursor Grok.
+          You can also paste a user API key from the
           <a class="inline-link hover:text-brand-100" href="${CURSOR_DASHBOARD_KEYS_URL}" target="_blank" rel="noopener noreferrer">Cursor API keys dashboard</a>.
+          After sign-in, the picker refreshes from Cursor's live model catalog.
         </p>
         <p id="cursor-auth-status" class="text-text-400 font-base-sm mt-2"></p>
         <label class="font-semibold text-text-200" for="cursor-api-key-input">API key (optional)</label>
@@ -2190,7 +2348,11 @@ function mountMetaSettingsPanel() {
           [CURSOR_API_EXPIRES]: 0,
         });
         if (cursorInput) cursorInput.value = "";
+        const catalog = await refreshCursorModelCatalog();
         await refreshCursor();
+        setCursorStatus(
+          `Cursor key saved. ${catalog.count} Cursor models available in the picker, including Claude, GPT, Gemini, and others.`,
+        );
       } catch (error) {
         setCursorStatus(`Cursor key was rejected: ${error.message || error}`);
       }
@@ -2202,6 +2364,7 @@ function mountMetaSettingsPanel() {
         await chrome.storage.session.remove([CURSOR_API_KEY, CURSOR_API_EMAIL, CURSOR_API_EXPIRES]).catch(() => {});
       }
       if (cursorInput) cursorInput.value = "";
+      await refreshCursorModelCatalog();
       await refreshCursor();
     });
 
@@ -2272,3 +2435,4 @@ function mountMetaSettingsPanel() {
 }
 
 mountMetaSettingsPanel();
+refreshCursorModelCatalog().catch(() => {});

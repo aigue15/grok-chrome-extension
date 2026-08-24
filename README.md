@@ -24,10 +24,7 @@ The model picker offers:
 - **Grok 4.2 Non-reasoning** (`grok-4.20-0309-non-reasoning`)
 - **Grok 4.2 Multi-agent** (`grok-4.20-multi-agent-0309`)
 - **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — Meta Model API key required
-- **Cursor Auto** (`cursor-auto`) — Cursor subscription
-- **Cursor Auto (Smart)** (`cursor-auto-smart`) — Cursor Router
-- **Composer 2** (`cursor-composer-2`) — Cursor subscription
-- **Cursor Grok 4.6** (`cursor-grok-4.6`) — Grok via Cursor quota
+- **Cursor models** (billed to a Cursor subscription): Auto, Composer 2 / 2.5, Cursor Grok 4.6 / 4.5, plus Cursor's external catalog — Claude (Sonnet / Opus / Haiku / Fable), GPT-5.x, Gemini 3.x, Kimi, and GLM. After you sign in, the picker refreshes from `GET https://api.cursor.com/v1/models` so IDs match your account.
 
 Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**. Muse uses Meta's 1M-token context and local clipping instead. Cursor models run as no-repo Cloud Agents and count against your Cursor plan.
 
@@ -43,7 +40,7 @@ Cursor sign-in uses the same browser login as the Cursor SDK / CLI (`/loginDeepC
 
 1. Open **Extension options**.
 2. Click **Sign in with Cursor** (or paste a `crsr_` key from [cursor.com/dashboard/api](https://cursor.com/dashboard/api)).
-3. Pick a Cursor model in the side panel.
+3. Pick a Cursor model in the side panel (Claude, GPT, Gemini, Composer, and the rest of Cursor's catalog).
 4. Optional: enable **Use Cursor quota for Grok models too** to send the existing Grok picker entries through Cursor instead of xAI.
 
 Enterprise admins can set the `cursorApiKey` managed-policy field. Grok device-code login is unchanged when that box is off.
