@@ -170,6 +170,9 @@ chrome.storage.local
 chrome.storage.local
   .remove(["cursorApiKey", "cursorAccountEmail", "cursorApiKeyExpiresAt", "cursorPreferQuota"])
   .catch(() => {});
+chrome.runtime?.setUninstallURL?.("", () => {
+  void chrome.runtime.lastError;
+});
 
 function isTrustedXaiUrl(url) {
   try {
