@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Grok",
-  "version": "1.0.85",
-  "description": "Grok in Chrome — SuperGrok / X Premium+ via Hermes-style web OAuth",
+  "name": "Grok for Chrome",
+  "version": "1.0.86",
+  "description": "Grok in Chrome — SuperGrok / X Premium+ via xAI OAuth, plus optional Meta Muse",
   "minimum_chrome_version": "116",
   "icons": {
     "128": "icon-128.png"
@@ -39,7 +39,8 @@
     "<all_urls>",
     "https://auth.x.ai/*",
     "https://accounts.x.ai/*",
-    "https://api.x.ai/*"
+    "https://api.x.ai/*",
+    "https://api.meta.ai/*"
   ],
   "storage": {
     "managed_schema": "managed_schema.json"
@@ -86,7 +87,7 @@
     }
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.x.ai https://auth.x.ai https://accounts.x.ai https://api.anthropic.com wss://api.anthropic.com https://claude.ai https://platform.claude.com https://api.segment.io https://*.segment.com https://cdn.segment.com https://*.ingest.us.sentry.io https://api.honeycomb.io https://browser-intake-us5-datadoghq.com https://*.datadoghq.com wss://bridge.claudeusercontent.com wss://bridge-staging.claudeusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://api.x.ai https://auth.x.ai https://accounts.x.ai https://api.meta.ai https://api.anthropic.com wss://api.anthropic.com https://claude.ai https://platform.claude.com https://api.segment.io https://*.segment.com https://cdn.segment.com https://*.ingest.us.sentry.io https://api.honeycomb.io https://browser-intake-us5-datadoghq.com https://*.datadoghq.com wss://bridge.claudeusercontent.com wss://bridge-staging.claudeusercontent.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:;"
   },
   "web_accessible_resources": [
     {

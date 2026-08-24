@@ -1,6 +1,7 @@
 /**
  * Grok backend for this extension.
  * Same Hermes / OpenClaw xAI device-code login (auth.x.ai, no on-device key).
+ * Optional Meta Muse Spark 1.2 Contributor via a Model API key in native settings.
  * The original UI, tools, and browser-control scripts stay in place.
  */
 const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
@@ -12,13 +13,24 @@ const XAI_DEVICE_CODE_URL = `${XAI_OAUTH_ISSUER}/oauth2/device/code`;
 const XAI_API_BASE = "https://api.x.ai/v1";
 const XAI_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
+const META_API_BASE = "https://api.meta.ai/v1";
+const META_API_KEY = "metaApiKey";
+const HIDDEN_MODELS_KEY = "hiddenModels";
+const META_DASHBOARD_URL = "https://dev.meta.ai/";
+const MUSE_MODEL_ID = "muse-spark-1.2-contributor";
+const MUSE_MODEL_NAME = "Muse Spark 1.2 Contributor";
+const MUSE_SEND_BUDGET = 800_000;
+
 const MODELS = [
-  { id: "grok-4.6", name: "Grok 4.6" },
-  { id: "grok-4.5", name: "Grok 4.5" },
-  { id: "grok-4.3", name: "Grok 4.3" },
-  { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning" },
-  { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
-  { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
+  { id: "grok-4.6", name: "Grok 4.6", provider: "xai" },
+  { id: "grok-4.5", name: "Grok 4.5", provider: "xai" },
+  { id: "grok-4.3", name: "Grok 4.3", provider: "xai" },
+  { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning", provider: "xai" },
+  { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning", provider: "xai" },
+  { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent", provider: "xai" },
+  { id: "muse-spark-1.2", name: "Muse Spark 1.2", provider: "meta", note: "Standard tier. Prompts are not used to train Meta models." },
+  { id: "muse-spark-1.1", name: "Muse Spark 1.1", provider: "meta", note: "Standard tier. Prompts are not used to train Meta models." },
+  { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME, provider: "meta", note: "Contributor tier. Prompts and completions may train future Meta models." },
 ];
 const DEFAULT_MODEL = "grok-4.6";
 const COMPRESS_MODEL = "grok-4.20-0309-non-reasoning";
@@ -117,7 +129,7 @@ const GROK_FEATURES = {
       value: {
         default: DEFAULT_MODEL,
         small_fast_model: "grok-4.5",
-        options: MODELS.map((model) => ({
+        options: MODELS.filter((model) => model.provider === "xai").map((model) => ({
           model: model.id,
           name: model.name,
         })),
@@ -155,6 +167,9 @@ chrome.storage.local
     },
   })
   .catch(() => {});
+chrome.storage.local
+  .remove(["cursorApiKey", "cursorAccountEmail", "cursorApiKeyExpiresAt", "cursorPreferQuota"])
+  .catch(() => {});
 
 function isTrustedXaiUrl(url) {
   try {
@@ -182,9 +197,118 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
   });
 }
 
+function isMuseModel(model) {
+  return String(model || "").toLowerCase().includes("muse");
+}
+
+let hiddenModelIds = [];
+let metaKeyConfigured = false;
+
+function listEligibleModels() {
+  const hidden = new Set(hiddenModelIds.map((id) => String(id)));
+  return MODELS.filter((model) => {
+    if (hidden.has(model.id)) return false;
+    if (model.provider === "meta" && !metaKeyConfigured) return false;
+    return true;
+  });
+}
+
+function getVisibleModels() {
+  const visible = listEligibleModels();
+  return visible.length ? visible : MODELS.filter((model) => model.provider === "xai").slice(0, 1);
+}
+
+function buildGrokFeatures() {
+  const visible = getVisibleModels();
+  const defaultId = visible.some((model) => model.id === DEFAULT_MODEL)
+    ? DEFAULT_MODEL
+    : visible[0].id;
+  const smallFast = visible.some((model) => model.id === "grok-4.5")
+    ? "grok-4.5"
+    : visible[0].id;
+  const features = {
+    ...GROK_FEATURES,
+    features: {
+      ...GROK_FEATURES.features,
+      chrome_ext_models: {
+        on: true,
+        value: {
+          default: defaultId,
+          small_fast_model: smallFast,
+          options: visible.map((model) => ({
+            model: model.id,
+            name: model.name,
+          })),
+        },
+      },
+    },
+  };
+  return features;
+}
+
+function publishFeatureValues(features = buildGrokFeatures()) {
+  globalThis.__GROK_FEATURE_VALUES = Object.fromEntries(
+    Object.entries(features.features).map(([key, feature]) => [key, feature.value]),
+  );
+  chrome.storage.local
+    .set({
+      features: {
+        payload: features,
+        timestamp: Date.now(),
+      },
+    })
+    .catch(() => {});
+}
+
+async function loadHiddenModels() {
+  const stored = await storageGet([HIDDEN_MODELS_KEY]);
+  const raw = stored[HIDDEN_MODELS_KEY];
+  hiddenModelIds = Array.isArray(raw) ? raw.map(String) : [];
+  const { key } = await getMetaApiKey();
+  metaKeyConfigured = Boolean(key);
+  publishFeatureValues();
+}
+
+async function setModelHidden(modelId, hidden) {
+  const model = MODELS.find((entry) => entry.id === modelId);
+  if (model?.provider === "meta" && !metaKeyConfigured) {
+    throw new Error("Save a Meta API key to enable Meta models.");
+  }
+  const previous = hiddenModelIds;
+  const next = new Set(hiddenModelIds);
+  if (hidden) next.add(modelId);
+  else next.delete(modelId);
+  hiddenModelIds = [...next];
+  if (!listEligibleModels().length) {
+    hiddenModelIds = previous;
+    throw new Error("Keep at least one model visible.");
+  }
+  await storageSet({ [HIDDEN_MODELS_KEY]: hiddenModelIds });
+  publishFeatureValues();
+}
+
+async function getMetaApiKey() {
+  try {
+    const managed = await chrome.storage?.managed?.get?.(META_API_KEY);
+    const managedKey = String(managed?.[META_API_KEY] || "").trim();
+    if (managedKey) return { key: managedKey, source: "managed" };
+  } catch {
+    /* unmanaged / no policy */
+  }
+  const stored = await storageGet([META_API_KEY]);
+  const key = String(stored[META_API_KEY] || "").trim();
+  return key ? { key, source: "local" } : { key: "", source: "" };
+}
+
 function mapModel(model) {
   const raw = String(model || "").toLowerCase();
   if (MODELS.some((entry) => entry.id === raw)) return raw;
+  if (isMuseModel(raw)) {
+    const matches = MODELS.filter(
+      (entry) => entry.provider === "meta" && raw.includes(entry.id),
+    ).sort((a, b) => b.id.length - a.id.length);
+    return matches[0]?.id || MUSE_MODEL_ID;
+  }
   if (raw.includes("multi-agent") || raw.includes("grok-4.20-multi")) {
     return "grok-4.20-multi-agent-0309";
   }
@@ -396,7 +520,24 @@ async function runDeviceLogin() {
 }
 
 function grokFeatures() {
-  return GROK_FEATURES;
+  return buildGrokFeatures();
+}
+
+function museProfile(uuid) {
+  return {
+    account: {
+      uuid,
+      email: "muse@meta.ai",
+      display_name: MUSE_MODEL_NAME,
+      has_claude_max: true,
+      has_claude_pro: true,
+    },
+    organization: {
+      uuid,
+      name: "Muse",
+      organization_type: "claude_max",
+    },
+  };
 }
 
 async function grokProfile() {
@@ -409,6 +550,14 @@ async function grokProfile() {
     "grokAuth",
   ]);
   if (!stored[TOKEN_KEYS.ACCESS] && !stored[TOKEN_KEYS.REFRESH]) {
+    const { key } = await getMetaApiKey();
+    if (key) {
+      const uuid = stored[STABLE_ACCOUNT_KEY] || crypto.randomUUID();
+      if (uuid !== stored[STABLE_ACCOUNT_KEY]) {
+        await storageSet({ [STABLE_ACCOUNT_KEY]: uuid });
+      }
+      return museProfile(uuid);
+    }
     chrome.storage.local
       .remove([
         STABLE_ACCOUNT_KEY,
@@ -934,24 +1083,52 @@ async function proxyMessages(init) {
   const raw = typeof init?.body === "string" ? init.body : await new Response(init?.body).text();
   const body = raw ? JSON.parse(raw) : {};
   const model = mapModel(body.model);
-  const stored = await storageGet([TOKEN_KEYS.ACCESS, TOKEN_KEYS.EXPIRY]);
-  if (!stored[TOKEN_KEYS.ACCESS]) {
-    return jsonResponse({ error: { type: "authentication_error", message: "Sign in with Grok first." } }, 401);
-  }
-  if (stored[TOKEN_KEYS.EXPIRY] && Date.now() > Number(stored[TOKEN_KEYS.EXPIRY]) - 60_000) {
-    try {
-      await refreshAccessToken();
-    } catch (error) {
-      return jsonResponse({ error: { type: "authentication_error", message: String(error.message || error) } }, 401);
+  const muse = isMuseModel(model);
+  let token = "";
+  let apiBase = XAI_API_BASE;
+  let apiLabel = "Grok API";
+  let sendBudget = GROK_SEND_BUDGET;
+
+  if (muse) {
+    const { key } = await getMetaApiKey();
+    if (!key) {
+      return jsonResponse(
+        {
+          error: {
+            type: "authentication_error",
+            message:
+              "Add a Meta Model API key in Settings → Models to use a Muse model.",
+          },
+        },
+        401,
+      );
     }
+    token = key;
+    apiBase = META_API_BASE;
+    apiLabel = "Meta Model API";
+    sendBudget = MUSE_SEND_BUDGET;
+  } else {
+    const stored = await storageGet([TOKEN_KEYS.ACCESS, TOKEN_KEYS.EXPIRY]);
+    if (!stored[TOKEN_KEYS.ACCESS]) {
+      return jsonResponse({ error: { type: "authentication_error", message: "Sign in with Grok first." } }, 401);
+    }
+    if (stored[TOKEN_KEYS.EXPIRY] && Date.now() > Number(stored[TOKEN_KEYS.EXPIRY]) - 60_000) {
+      try {
+        await refreshAccessToken();
+      } catch (error) {
+        return jsonResponse({ error: { type: "authentication_error", message: String(error.message || error) } }, 401);
+      }
+    }
+    const fresh = await storageGet([TOKEN_KEYS.ACCESS]);
+    token = fresh[TOKEN_KEYS.ACCESS];
   }
-  const fresh = await storageGet([TOKEN_KEYS.ACCESS]);
+
   const converted = anthropicMessagesToOpenAI(body);
   const payload = {
     model,
-    messages: isCompactRequest(body)
-      ? fitMessagesToBudget(converted)
-      : await compressMessagesIfNeeded(converted, fresh[TOKEN_KEYS.ACCESS]),
+    messages: isCompactRequest(body) || muse
+      ? fitMessagesToBudget(converted, sendBudget)
+      : await compressMessagesIfNeeded(converted, token),
     temperature: body.temperature ?? 0.2,
     stream: Boolean(body.stream),
   };
@@ -963,10 +1140,10 @@ async function proxyMessages(init) {
   if (body.max_tokens) payload.max_tokens = body.max_tokens;
 
   const send = (bodyPayload) =>
-    nativeFetch(`${XAI_API_BASE}/chat/completions`, {
+    nativeFetch(`${apiBase}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${fresh[TOKEN_KEYS.ACCESS]}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: bodyPayload.stream ? "text/event-stream" : "application/json",
       },
@@ -980,12 +1157,9 @@ async function proxyMessages(init) {
     if (looksLikePromptTooLong(text)) {
       res = await send({
         ...payload,
-        messages: await compressMessagesIfNeeded(
-          payload.messages,
-          fresh[TOKEN_KEYS.ACCESS],
-          260_000,
-          3,
-        ),
+        messages: muse
+          ? fitMessagesToBudget(payload.messages, 260_000)
+          : await compressMessagesIfNeeded(payload.messages, token, 260_000, 3),
       });
     } else if (looksLikeImageError(text) && payload.messages.some((message) => Array.isArray(message.content))) {
       res = await send({
@@ -994,7 +1168,7 @@ async function proxyMessages(init) {
       });
     } else {
       return jsonResponse(
-        { type: "error", error: { type: "api_error", message: text || `Grok API ${res.status}` } },
+        { type: "error", error: { type: "api_error", message: text || `${apiLabel} ${res.status}` } },
         res.status,
       );
     }
@@ -1003,7 +1177,7 @@ async function proxyMessages(init) {
   if (!res.ok) {
     const text = await res.text();
     return jsonResponse(
-      { type: "error", error: { type: "api_error", message: text || `Grok API ${res.status}` } },
+      { type: "error", error: { type: "api_error", message: text || `${apiLabel} ${res.status}` } },
       res.status,
     );
   }
@@ -1066,6 +1240,7 @@ async function handleAnthropic(url, init) {
   }
 
   if (path.includes("/api/bootstrap/features/")) {
+    await loadHiddenModels();
     return jsonResponse(grokFeatures());
   }
 
@@ -1078,8 +1253,9 @@ async function handleAnthropic(url, init) {
   }
 
   if (path.includes("/v1/models")) {
+    await loadHiddenModels();
     return jsonResponse({
-      data: MODELS.map((model) => ({
+      data: getVisibleModels().map((model) => ({
         id: model.id,
         display_name: model.name,
         type: "model",
@@ -1383,6 +1559,14 @@ if (chrome.tabs?.create) {
   };
 }
 
+if (chrome.storage?.onChanged) {
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" && area !== "managed" && area !== "session") return;
+    if (!changes[META_API_KEY] && !changes[HIDDEN_MODELS_KEY]) return;
+    loadHiddenModels().catch(() => {});
+  });
+}
+
 chrome.storage?.local.get(["features"]).then((stored) => {
   const features = stored?.features?.payload?.features || stored?.features?.features;
   const prompt = features?.chrome_ext_system_prompt?.value?.systemPrompt;
@@ -1398,10 +1582,323 @@ chrome.storage?.local.get(["features"]).then((stored) => {
 
 if (chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "grok_login") return;
-    runDeviceLogin()
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
-    return true;
+    if (message?.type === "grok_login") {
+      runDeviceLogin()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (message?.type === "meta_api_key_get") {
+      getMetaApiKey()
+        .then((result) => sendResponse({ ok: true, ...result, configured: Boolean(result.key) }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (message?.type === "meta_api_key_set") {
+      const key = String(message.key || "").trim();
+      const write = key
+        ? storageSet({ [META_API_KEY]: key })
+        : chrome.storage.local.remove(META_API_KEY);
+      Promise.resolve(write)
+        .then(async () => {
+          if (!key && chrome.storage?.session) {
+            await chrome.storage.session.remove(META_API_KEY).catch(() => {});
+          }
+          await loadHiddenModels();
+          sendResponse({ ok: true, configured: Boolean(key) });
+        })
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
   });
 }
+
+function maskApiKey(key) {
+  const value = String(key || "");
+  if (value.length <= 10) return value ? "••••••••" : "";
+  return `${value.slice(0, 6)}••••${value.slice(-4)}`;
+}
+
+function mountModelsSettings() {
+  if (typeof document === "undefined" || typeof location === "undefined") return;
+  if (!/options\.html$/i.test(location.pathname || "")) return;
+
+  const NAV_ID = "grok-models-nav";
+  const PANEL_ID = "grok-models-panel";
+  let modelsOpen = false;
+  const NAV_IDLE =
+    "block w-full text-left whitespace-nowrap transition-all ease-in-out active:scale-95 cursor-pointer font-base rounded-lg px-3 py-3 text-text-200 hover:bg-bg-200 hover:text-text-100";
+  const NAV_ACTIVE =
+    "block w-full text-left whitespace-nowrap transition-all ease-in-out active:scale-95 cursor-pointer font-base rounded-lg px-3 py-3 bg-bg-300 font-medium text-text-000";
+
+  const modelRow = (model) => {
+    const hidden = hiddenModelIds.includes(model.id);
+    return `
+      <div class="flex items-start justify-between gap-4 py-4 border-b border-border-400 last:border-b-0" data-model-id="${model.id}">
+        <div class="flex-1 min-w-0">
+          <div class="font-large text-text-100">${model.name}</div>
+          <div class="text-text-400 font-base-sm mt-1">${model.id}</div>
+          ${model.note ? `<div class="text-text-400 font-base-sm mt-1">${model.note}</div>` : ""}
+        </div>
+        <label class="flex items-center gap-2 shrink-0 text-text-200 font-base-sm">
+          <input type="checkbox" data-hide-model="${model.id}" data-provider="${model.provider}" ${hidden ? "" : "checked"} ${model.provider === "meta" && !metaKeyConfigured ? "disabled" : ""} />
+          Show
+        </label>
+      </div>
+    `;
+  };
+
+  const panelHtml = () => `
+    <h2 class="text-text-100 font-xl-bold">Models</h2>
+    <p class="text-text-300 font-base mt-2 mb-6">
+      The picker starts with Grok models. Save a Meta API key to unlock Muse Spark, then
+      choose which models appear in the side-panel picker. Get a key from the
+      <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>.
+    </p>
+    <h3 class="text-text-100 font-xl-bold">Meta Model API</h3>
+    <p class="text-text-300 font-base mt-2 mb-4">
+      Used for Muse Spark 1.1, Muse Spark 1.2, and Muse Spark 1.2 Contributor.
+    </p>
+    <label class="font-semibold text-text-200" for="meta-api-key-input">API key</label>
+    <input
+      id="meta-api-key-input"
+      type="password"
+      autocomplete="off"
+      spellcheck="false"
+      placeholder="LLM|…|…"
+      class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
+    />
+    <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
+    <div class="flex items-center gap-3 mt-4 mb-8">
+      <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Save key</button>
+      <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
+      <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
+    </div>
+    <h3 class="text-text-100 font-xl-bold">Grok</h3>
+    <p class="text-text-300 font-base mt-2 mb-2">Uses your Grok sign-in.</p>
+    <div id="grok-model-list">${MODELS.filter((model) => model.provider === "xai").map(modelRow).join("")}</div>
+    <h3 class="text-text-100 font-xl-bold mt-8">Meta</h3>
+    <p class="text-text-300 font-base mt-2 mb-2" id="meta-models-help">
+      Save a Meta API key above to add these to the picker.
+    </p>
+    <div id="meta-model-list">${MODELS.filter((model) => model.provider === "meta").map(modelRow).join("")}</div>
+  `;
+
+  const nativeNavButtons = (ul) =>
+    [...ul.querySelectorAll("li > button")].filter((button) => button.id !== `${NAV_ID}-btn`);
+
+  const setNativeActive = (ul, active) => {
+    for (const button of nativeNavButtons(ul)) {
+      button.className = active ? NAV_IDLE : button.className;
+      if (active) button.className = NAV_IDLE;
+    }
+  };
+
+  const showModels = (grid, ul) => {
+    const panel = document.getElementById(PANEL_ID);
+    const native = [...grid.children].find((child) => child.id !== PANEL_ID && child.tagName !== "NAV");
+    if (native) native.style.display = "none";
+    if (panel) panel.style.display = "";
+    const btn = document.getElementById(`${NAV_ID}-btn`);
+    if (btn) btn.className = NAV_ACTIVE;
+    setNativeActive(ul, true);
+    modelsOpen = true;
+  };
+
+  const hideModels = (grid, ul) => {
+    const panel = document.getElementById(PANEL_ID);
+    const native = [...grid.children].find((child) => child.id !== PANEL_ID && child.tagName !== "NAV");
+    if (native) native.style.display = "";
+    if (panel) panel.style.display = "none";
+    const btn = document.getElementById(`${NAV_ID}-btn`);
+    if (btn) btn.className = NAV_IDLE;
+    modelsOpen = false;
+  };
+
+  const bindKeyControls = (panel) => {
+    if (panel.dataset.bound === "1") return;
+    panel.dataset.bound = "1";
+    const input = panel.querySelector("#meta-api-key-input");
+    const status = panel.querySelector("#meta-api-key-status");
+    const save = panel.querySelector("#meta-api-key-save");
+    const clear = panel.querySelector("#meta-api-key-clear");
+    const test = panel.querySelector("#meta-api-key-test");
+    const setStatus = (text) => {
+      if (status) status.textContent = text;
+    };
+
+    const refresh = async () => {
+      await loadHiddenModels();
+      const { key, source } = await getMetaApiKey();
+      if (source === "managed") {
+        if (input) {
+          input.value = key;
+          input.disabled = true;
+        }
+        if (save) save.disabled = true;
+        if (clear) clear.disabled = true;
+        setStatus("This key is set by organization policy and cannot be edited here.");
+      } else {
+        if (input) {
+          input.disabled = false;
+          input.value = "";
+          input.placeholder = key ? maskApiKey(key) : "LLM|…|…";
+        }
+        if (save) save.disabled = false;
+        if (clear) clear.disabled = !key;
+        setStatus(
+          key
+            ? `Saved locally. Current key: ${maskApiKey(key)}. Muse models are in the picker.`
+            : "No Meta API key saved. The picker stays Grok-only.",
+        );
+      }
+      const help = panel.querySelector("#meta-models-help");
+      if (help) {
+        help.textContent = key
+          ? "These models are now available in the picker."
+          : "Save a Meta API key above to add these to the picker.";
+      }
+      for (const box of panel.querySelectorAll("[data-hide-model]")) {
+        const id = box.getAttribute("data-hide-model");
+        const model = MODELS.find((entry) => entry.id === id);
+        box.checked = !hiddenModelIds.includes(id);
+        if (model?.provider === "meta") box.disabled = !key;
+      }
+    };
+
+    save?.addEventListener("click", async () => {
+      const next = String(input?.value || "").trim();
+      if (!next) {
+        setStatus("Paste a Meta Model API key, then click Save.");
+        return;
+      }
+      await storageSet({ [META_API_KEY]: next });
+      if (input) input.value = "";
+      await refresh();
+      setStatus(`Saved. Muse Spark models are now in the picker. Current key: ${maskApiKey(next)}`);
+    });
+
+    clear?.addEventListener("click", async () => {
+      await chrome.storage.local.remove(META_API_KEY);
+      if (chrome.storage?.session) {
+        await chrome.storage.session.remove(META_API_KEY).catch(() => {});
+      }
+      if (input) input.value = "";
+      await refresh();
+      setStatus("Cleared. The picker is Grok-only again.");
+    });
+
+    test?.addEventListener("click", async () => {
+      const typed = String(input?.value || "").trim();
+      const { key } = await getMetaApiKey();
+      const useKey = typed || key;
+      if (!useKey) {
+        setStatus("Save a Meta Model API key before testing.");
+        return;
+      }
+      setStatus("Testing Meta Model API key…");
+      try {
+        const res = await nativeFetch(`${META_API_BASE}/models`, {
+          headers: { Authorization: `Bearer ${useKey}`, Accept: "application/json" },
+        });
+        if (!res.ok) {
+          setStatus(`Key was rejected (${res.status}). Check the key in the Meta dashboard.`);
+          return;
+        }
+        const json = await res.json();
+        const ids = (json.data || json.models || []).map((entry) => entry.id || entry).filter(Boolean);
+        const museIds = MODELS.filter((model) => model.provider === "meta").map((model) => model.id);
+        const found = museIds.filter((id) => ids.some((entry) => String(entry).includes(id)));
+        setStatus(
+          found.length
+            ? `Key works. Available: ${found.map((id) => MODELS.find((model) => model.id === id)?.name || id).join(", ")}.`
+            : "Key works. You can select Muse models in the side panel.",
+        );
+      } catch (error) {
+        setStatus(`Could not reach Meta Model API: ${error.message || error}`);
+      }
+    });
+
+    panel.addEventListener("change", async (event) => {
+      const box = event.target;
+      if (!(box instanceof HTMLInputElement) || !box.hasAttribute("data-hide-model")) return;
+      try {
+        await setModelHidden(box.getAttribute("data-hide-model"), !box.checked);
+      } catch (error) {
+        box.checked = true;
+        setStatus(String(error.message || error));
+      }
+    });
+
+    refresh().catch(() => {});
+  };
+
+  const mountStandalone = () => {
+    if (document.getElementById(PANEL_ID) || document.querySelector("nav ul")) return;
+    const host = document.getElementById("root") || document.body;
+    const panel = document.createElement("div");
+    panel.id = PANEL_ID;
+    panel.className = "w-full max-w-6xl my-8 px-4";
+    panel.innerHTML = panelHtml();
+    host.appendChild(panel);
+    bindKeyControls(panel);
+  };
+
+  const ensure = () => {
+    const ul = document.querySelector("nav ul");
+    const nav = ul?.closest("nav");
+    const grid = nav?.parentElement;
+    if (!ul || !grid) {
+      if (document.readyState === "complete") setTimeout(mountStandalone, 400);
+      return;
+    }
+    const standalone = document.getElementById(PANEL_ID);
+    if (standalone && standalone.parentElement !== grid) standalone.remove();
+
+    if (!document.getElementById(NAV_ID)) {
+      const li = document.createElement("li");
+      li.id = NAV_ID;
+      const button = document.createElement("button");
+      button.id = `${NAV_ID}-btn`;
+      button.type = "button";
+      button.className = NAV_IDLE;
+      button.textContent = "Models";
+      li.appendChild(button);
+      const first = ul.querySelector("li");
+      if (first?.nextSibling) ul.insertBefore(li, first.nextSibling);
+      else ul.appendChild(li);
+      button.addEventListener("click", () => showModels(grid, ul));
+      for (const native of nativeNavButtons(ul)) {
+        if (native.dataset.grokBound === "1") continue;
+        native.dataset.grokBound = "1";
+        native.addEventListener("click", () => hideModels(grid, ul));
+      }
+    }
+
+    if (!document.getElementById(PANEL_ID)) {
+      const panel = document.createElement("div");
+      panel.id = PANEL_ID;
+      panel.style.display = "none";
+      panel.innerHTML = panelHtml();
+      grid.appendChild(panel);
+      bindKeyControls(panel);
+    }
+    if (modelsOpen) showModels(grid, ul);
+  };
+
+  const start = () => {
+    loadHiddenModels().catch(() => {});
+    ensure();
+    const observer = new MutationObserver(() => ensure());
+    observer.observe(document.body, { childList: true, subtree: true });
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", start, { once: true });
+  } else {
+    start();
+  }
+}
+
+loadHiddenModels().catch(() => {});
+mountModelsSettings();
