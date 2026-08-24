@@ -1591,6 +1591,7 @@ function mountModelsSettings() {
 
   const NAV_ID = "grok-models-nav";
   const PANEL_ID = "grok-models-panel";
+  let modelsOpen = false;
   const NAV_IDLE =
     "block w-full text-left whitespace-nowrap transition-all ease-in-out active:scale-95 cursor-pointer font-base rounded-lg px-3 py-3 text-text-200 hover:bg-bg-200 hover:text-text-100";
   const NAV_ACTIVE =
@@ -1664,6 +1665,7 @@ function mountModelsSettings() {
     const btn = document.getElementById(`${NAV_ID}-btn`);
     if (btn) btn.className = NAV_ACTIVE;
     setNativeActive(ul, true);
+    modelsOpen = true;
   };
 
   const hideModels = (grid, ul) => {
@@ -1673,6 +1675,7 @@ function mountModelsSettings() {
     if (panel) panel.style.display = "none";
     const btn = document.getElementById(`${NAV_ID}-btn`);
     if (btn) btn.className = NAV_IDLE;
+    modelsOpen = false;
   };
 
   const bindKeyControls = (panel) => {
@@ -1795,7 +1798,7 @@ function mountModelsSettings() {
     const nav = ul?.closest("nav");
     const grid = nav?.parentElement;
     if (!ul || !grid) {
-      if (document.readyState === "complete") mountStandalone();
+      if (document.readyState === "complete") setTimeout(mountStandalone, 400);
       return;
     }
     const standalone = document.getElementById(PANEL_ID);
