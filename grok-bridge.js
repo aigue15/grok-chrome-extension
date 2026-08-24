@@ -1,7 +1,7 @@
 /**
  * Grok backend for this extension.
- * Same Hermes / OpenClaw xAI device-code login (auth.x.ai, no on-device key).
- * Optional Meta Muse Spark 1.2 Contributor via a Model API key in native settings.
+ * xAI device-code login (auth.x.ai, no on-device key).
+ * Optional Meta Muse Spark via a Model API key in native settings.
  * The original UI, tools, and browser-control scripts stay in place.
  */
 const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
