@@ -1,10 +1,12 @@
 # Grok for Chrome
 
-This is the official **Claude for Chrome** extension, connected to **Grok** instead of Claude. Browser control, the side panel, tools, and the rest of the product are unchanged.
+A Chrome side-panel browser agent powered by **Grok**, with optional **Muse Spark 1.2 Contributor**. It can read the page, click, type, take screenshots, and work across tab groups.
 
-## Connection (same as Hermes Agent)
+This is an independent project. It is not affiliated with Anthropic, xAI, or Meta.
 
-Sign-in is **xAI OAuth device-code** against [auth.x.ai](https://auth.x.ai) — the same public client and scopes Hermes Agent uses. Nothing is installed on the device: no API key file, no native host, no Claude Desktop pairing.
+## Sign in
+
+Sign-in is **xAI OAuth device-code** against [auth.x.ai](https://auth.x.ai) — the same public client and scopes Hermes Agent uses. Nothing is installed on the device: no API key file, no native host.
 
 - Client ID: `b1a00492-073a-47ea-816f-4c329264a828`
 - Scopes: `openid profile email offline_access grok-cli:access api:access`
@@ -14,8 +16,6 @@ Sign-in is **xAI OAuth device-code** against [auth.x.ai](https://auth.x.ai) — 
 Click **Log in** in the side panel. Chrome opens an xAI / accounts.x.ai page. Approve access (enter the code if asked). Tokens stay in extension storage and refresh in the background.
 
 ## Models
-
-The model picker offers:
 
 - **Grok 4.6** (default)
 - **Grok 4.5**
@@ -29,21 +29,17 @@ Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**. Muse uses Meta
 
 ## Meta Muse API key
 
-Muse Spark 1.2 Contributor talks to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open the extension **Options** page (chrome://extensions → Grok → Details → Extension options) and paste the key there. Enterprise admins can also set the `metaApiKey` managed-policy field.
+Muse Spark 1.2 Contributor talks to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open **chrome://extensions → Grok for Chrome → Details → Extension options** and paste the key there. Enterprise admins can also set the `metaApiKey` managed-policy field.
 
 Contributor-tier prompts and completions may be used to train future Meta models. Grok sign-in is unchanged and still used for every Grok model.
 
 ## Install (unpacked)
 
-1. Remove or disable the Chrome Web Store **Claude** extension if it is installed (same side-panel slot).
+1. If the Chrome Web Store **Claude** extension is installed, disable it (same side-panel slot).
 2. Open `chrome://extensions`
 3. Enable **Developer mode**
 4. **Load unpacked** → this folder (the one that contains `manifest.json`)
-5. Pin **Grok** and open the side panel
+5. Pin **Grok for Chrome** and open the side panel
 6. Sign in with your Grok subscription
-
-## What stayed the same
-
-Page reading, the accessibility tree, the on-page cursor, clicks / typing / screenshots, tab groups, permissions, shortcuts, and the existing side-panel UI all still come from this extension. Only the Anthropic login and `/v1/messages` backend were swapped for Grok.
 
 Reload the unpacked extension on `chrome://extensions` after any code change. Sign in on a normal `https` page, not `chrome://`.

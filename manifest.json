@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Grok",
+  "name": "Grok for Chrome",
   "version": "1.0.86",
-  "description": "Grok in Chrome — SuperGrok / X Premium+ via Hermes-style web OAuth",
+  "description": "Grok in Chrome — SuperGrok / X Premium+ via xAI OAuth, plus optional Meta Muse",
   "minimum_chrome_version": "116",
   "icons": {
     "128": "icon-128.png"
