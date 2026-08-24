@@ -9,9 +9,9 @@ Not affiliated with Anthropic, xAI, or Meta.
 ## How to use
 
 1. If the Chrome Web Store **Claude** extension is installed, disable it (same side-panel slot).
-2. Open `chrome://extensions`, turn on **Developer mode**, and **Load unpacked** this folder (`manifest.json`).
+2. Download [`grok-for-chrome.zip`](./grok-for-chrome.zip), unzip it, then open `chrome://extensions`, turn on **Developer mode**, and **Load unpacked** the `grok-for-chrome` folder.
 3. Pin **Grok for Chrome**, open the side panel, and sign in with [SuperGrok](https://x.ai/grok) or [X Premium+](https://x.com/i/premium_sign_up).
-4. Sign in on a normal `https` page, not `chrome://`. Reload the unpacked extension after code changes.
+4. Sign in on a normal `https` page, not `chrome://`.
 
 Sign-in is xAI OAuth (device code) at [auth.x.ai](https://auth.x.ai). No API key file on the device.
 
