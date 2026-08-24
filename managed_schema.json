@@ -13,6 +13,11 @@
       "title": "Force Login Organization UUID",
       "description": "Restricts which Anthropic organization(s) the extension can be used with. Accepts either a single UUID string or a JSON-encoded array of UUID strings. If the signed-in user's organization is not in this list, the extension shows a blocking page with a log out button.",
       "type": "string"
+    },
+    "metaApiKey": {
+      "title": "Meta Model API key",
+      "description": "API key for Meta Muse Spark 1.2 Contributor (api.meta.ai). Create a key in the Meta Model API dashboard. When this policy is set, it overrides the key saved on the extension options page. Contributor-tier prompts and completions may be used to train future Meta models.",
+      "type": "string"
     }
   }
 }

@@ -1,6 +1,7 @@
 /**
  * Grok backend for this extension.
  * Same Hermes / OpenClaw xAI device-code login (auth.x.ai, no on-device key).
+ * Optional Meta Muse Spark 1.2 Contributor via a Model API key in native settings.
  * The original UI, tools, and browser-control scripts stay in place.
  */
 const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
@@ -12,6 +13,13 @@ const XAI_DEVICE_CODE_URL = `${XAI_OAUTH_ISSUER}/oauth2/device/code`;
 const XAI_API_BASE = "https://api.x.ai/v1";
 const XAI_DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 
+const META_API_BASE = "https://api.meta.ai/v1";
+const META_API_KEY = "metaApiKey";
+const META_DASHBOARD_URL = "https://dev.meta.ai/";
+const MUSE_MODEL_ID = "muse-spark-1.2-contributor";
+const MUSE_MODEL_NAME = "Muse Spark 1.2 Contributor";
+const MUSE_SEND_BUDGET = 800_000;
+
 const MODELS = [
   { id: "grok-4.6", name: "Grok 4.6" },
   { id: "grok-4.5", name: "Grok 4.5" },
@@ -19,6 +27,7 @@ const MODELS = [
   { id: "grok-4.20-0309-reasoning", name: "Grok 4.2 Reasoning" },
   { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
   { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
+  { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME },
 ];
 const DEFAULT_MODEL = "grok-4.6";
 const COMPRESS_MODEL = "grok-4.20-0309-non-reasoning";
@@ -182,9 +191,27 @@ function jsonResponse(body, status = 200, extraHeaders = {}) {
   });
 }
 
+function isMuseModel(model) {
+  return String(model || "").toLowerCase().includes("muse");
+}
+
+async function getMetaApiKey() {
+  try {
+    const managed = await chrome.storage?.managed?.get?.(META_API_KEY);
+    const managedKey = String(managed?.[META_API_KEY] || "").trim();
+    if (managedKey) return { key: managedKey, source: "managed" };
+  } catch {
+    /* unmanaged / no policy */
+  }
+  const stored = await storageGet([META_API_KEY]);
+  const key = String(stored[META_API_KEY] || "").trim();
+  return key ? { key, source: "local" } : { key: "", source: "" };
+}
+
 function mapModel(model) {
   const raw = String(model || "").toLowerCase();
   if (MODELS.some((entry) => entry.id === raw)) return raw;
+  if (isMuseModel(raw)) return MUSE_MODEL_ID;
   if (raw.includes("multi-agent") || raw.includes("grok-4.20-multi")) {
     return "grok-4.20-multi-agent-0309";
   }
@@ -399,6 +426,23 @@ function grokFeatures() {
   return GROK_FEATURES;
 }
 
+function museProfile(uuid) {
+  return {
+    account: {
+      uuid,
+      email: "muse@meta.ai",
+      display_name: MUSE_MODEL_NAME,
+      has_claude_max: true,
+      has_claude_pro: true,
+    },
+    organization: {
+      uuid,
+      name: "Muse",
+      organization_type: "claude_max",
+    },
+  };
+}
+
 async function grokProfile() {
   const stored = await storageGet([
     TOKEN_KEYS.ACCOUNT,
@@ -409,6 +453,14 @@ async function grokProfile() {
     "grokAuth",
   ]);
   if (!stored[TOKEN_KEYS.ACCESS] && !stored[TOKEN_KEYS.REFRESH]) {
+    const { key } = await getMetaApiKey();
+    if (key) {
+      const uuid = stored[STABLE_ACCOUNT_KEY] || crypto.randomUUID();
+      if (uuid !== stored[STABLE_ACCOUNT_KEY]) {
+        await storageSet({ [STABLE_ACCOUNT_KEY]: uuid });
+      }
+      return museProfile(uuid);
+    }
     chrome.storage.local
       .remove([
         STABLE_ACCOUNT_KEY,
@@ -934,24 +986,52 @@ async function proxyMessages(init) {
   const raw = typeof init?.body === "string" ? init.body : await new Response(init?.body).text();
   const body = raw ? JSON.parse(raw) : {};
   const model = mapModel(body.model);
-  const stored = await storageGet([TOKEN_KEYS.ACCESS, TOKEN_KEYS.EXPIRY]);
-  if (!stored[TOKEN_KEYS.ACCESS]) {
-    return jsonResponse({ error: { type: "authentication_error", message: "Sign in with Grok first." } }, 401);
-  }
-  if (stored[TOKEN_KEYS.EXPIRY] && Date.now() > Number(stored[TOKEN_KEYS.EXPIRY]) - 60_000) {
-    try {
-      await refreshAccessToken();
-    } catch (error) {
-      return jsonResponse({ error: { type: "authentication_error", message: String(error.message || error) } }, 401);
+  const muse = isMuseModel(model);
+  let token = "";
+  let apiBase = XAI_API_BASE;
+  let apiLabel = "Grok API";
+  let sendBudget = GROK_SEND_BUDGET;
+
+  if (muse) {
+    const { key } = await getMetaApiKey();
+    if (!key) {
+      return jsonResponse(
+        {
+          error: {
+            type: "authentication_error",
+            message:
+              "Add a Meta Model API key in extension settings to use Muse Spark 1.2 Contributor.",
+          },
+        },
+        401,
+      );
     }
+    token = key;
+    apiBase = META_API_BASE;
+    apiLabel = "Meta Model API";
+    sendBudget = MUSE_SEND_BUDGET;
+  } else {
+    const stored = await storageGet([TOKEN_KEYS.ACCESS, TOKEN_KEYS.EXPIRY]);
+    if (!stored[TOKEN_KEYS.ACCESS]) {
+      return jsonResponse({ error: { type: "authentication_error", message: "Sign in with Grok first." } }, 401);
+    }
+    if (stored[TOKEN_KEYS.EXPIRY] && Date.now() > Number(stored[TOKEN_KEYS.EXPIRY]) - 60_000) {
+      try {
+        await refreshAccessToken();
+      } catch (error) {
+        return jsonResponse({ error: { type: "authentication_error", message: String(error.message || error) } }, 401);
+      }
+    }
+    const fresh = await storageGet([TOKEN_KEYS.ACCESS]);
+    token = fresh[TOKEN_KEYS.ACCESS];
   }
-  const fresh = await storageGet([TOKEN_KEYS.ACCESS]);
+
   const converted = anthropicMessagesToOpenAI(body);
   const payload = {
     model,
-    messages: isCompactRequest(body)
-      ? fitMessagesToBudget(converted)
-      : await compressMessagesIfNeeded(converted, fresh[TOKEN_KEYS.ACCESS]),
+    messages: isCompactRequest(body) || muse
+      ? fitMessagesToBudget(converted, sendBudget)
+      : await compressMessagesIfNeeded(converted, token),
     temperature: body.temperature ?? 0.2,
     stream: Boolean(body.stream),
   };
@@ -963,10 +1043,10 @@ async function proxyMessages(init) {
   if (body.max_tokens) payload.max_tokens = body.max_tokens;
 
   const send = (bodyPayload) =>
-    nativeFetch(`${XAI_API_BASE}/chat/completions`, {
+    nativeFetch(`${apiBase}/chat/completions`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${fresh[TOKEN_KEYS.ACCESS]}`,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
         Accept: bodyPayload.stream ? "text/event-stream" : "application/json",
       },
@@ -980,12 +1060,9 @@ async function proxyMessages(init) {
     if (looksLikePromptTooLong(text)) {
       res = await send({
         ...payload,
-        messages: await compressMessagesIfNeeded(
-          payload.messages,
-          fresh[TOKEN_KEYS.ACCESS],
-          260_000,
-          3,
-        ),
+        messages: muse
+          ? fitMessagesToBudget(payload.messages, 260_000)
+          : await compressMessagesIfNeeded(payload.messages, token, 260_000, 3),
       });
     } else if (looksLikeImageError(text) && payload.messages.some((message) => Array.isArray(message.content))) {
       res = await send({
@@ -994,7 +1071,7 @@ async function proxyMessages(init) {
       });
     } else {
       return jsonResponse(
-        { type: "error", error: { type: "api_error", message: text || `Grok API ${res.status}` } },
+        { type: "error", error: { type: "api_error", message: text || `${apiLabel} ${res.status}` } },
         res.status,
       );
     }
@@ -1003,7 +1080,7 @@ async function proxyMessages(init) {
   if (!res.ok) {
     const text = await res.text();
     return jsonResponse(
-      { type: "error", error: { type: "api_error", message: text || `Grok API ${res.status}` } },
+      { type: "error", error: { type: "api_error", message: text || `${apiLabel} ${res.status}` } },
       res.status,
     );
   }
@@ -1398,10 +1475,165 @@ chrome.storage?.local.get(["features"]).then((stored) => {
 
 if (chrome.runtime?.onMessage) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== "grok_login") return;
-    runDeviceLogin()
-      .then(() => sendResponse({ ok: true }))
-      .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
-    return true;
+    if (message?.type === "grok_login") {
+      runDeviceLogin()
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (message?.type === "meta_api_key_get") {
+      getMetaApiKey()
+        .then((result) => sendResponse({ ok: true, ...result, configured: Boolean(result.key) }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (message?.type === "meta_api_key_set") {
+      const key = String(message.key || "").trim();
+      storageSet({ [META_API_KEY]: key })
+        .then(() => sendResponse({ ok: true, configured: Boolean(key) }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
   });
 }
+
+function maskApiKey(key) {
+  const value = String(key || "");
+  if (value.length <= 10) return value ? "••••••••" : "";
+  return `${value.slice(0, 6)}••••${value.slice(-4)}`;
+}
+
+function mountMetaSettingsPanel() {
+  if (typeof document === "undefined" || typeof location === "undefined") return;
+  if (!/options\.html$/i.test(location.pathname || "")) return;
+
+  const PANEL_ID = "meta-api-settings";
+
+  const ensurePanel = () => {
+    if (document.getElementById(PANEL_ID)) return;
+    const host = document.getElementById("meta-api-settings-host") || document.body;
+    const panel = document.createElement("section");
+    panel.id = PANEL_ID;
+    panel.className = "px-6 pt-6";
+    panel.innerHTML = `
+      <div class="max-w-2xl mx-auto">
+        <h2 class="text-text-100 font-xl-bold">Meta Model API</h2>
+        <p class="text-text-300 font-base mt-2 mb-6">
+          Optional. Paste a key from the
+          <a class="inline-link hover:text-brand-100" href="${META_DASHBOARD_URL}" target="_blank" rel="noopener noreferrer">Meta Model API dashboard</a>
+          to use <strong>Muse Spark 1.2 Contributor</strong> in the model picker.
+          Contributor-tier prompts and completions may be used to train future Meta models.
+        </p>
+        <label class="font-semibold text-text-200" for="meta-api-key-input">API key</label>
+        <input
+          id="meta-api-key-input"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="LLM|…|…"
+          class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
+        />
+        <p id="meta-api-key-status" class="text-text-400 font-base-sm mt-2"></p>
+        <div class="flex items-center gap-3 mt-4 mb-6">
+          <button id="meta-api-key-save" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Save key</button>
+          <button id="meta-api-key-clear" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Clear</button>
+          <button id="meta-api-key-test" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Test key</button>
+        </div>
+      </div>
+    `;
+    host.prepend(panel);
+
+    const input = panel.querySelector("#meta-api-key-input");
+    const status = panel.querySelector("#meta-api-key-status");
+    const save = panel.querySelector("#meta-api-key-save");
+    const clear = panel.querySelector("#meta-api-key-clear");
+    const test = panel.querySelector("#meta-api-key-test");
+
+    const setStatus = (text) => {
+      if (status) status.textContent = text;
+    };
+
+    const refresh = async () => {
+      const { key, source } = await getMetaApiKey();
+      if (source === "managed") {
+        if (input) {
+          input.value = key;
+          input.disabled = true;
+        }
+        if (save) save.disabled = true;
+        if (clear) clear.disabled = true;
+        setStatus("This key is set by organization policy and cannot be edited here.");
+        return;
+      }
+      if (input) {
+        input.disabled = false;
+        input.value = "";
+        input.placeholder = key ? maskApiKey(key) : "LLM|…|…";
+      }
+      if (save) save.disabled = false;
+      if (clear) clear.disabled = !key;
+      setStatus(key ? `Saved locally. Current key: ${maskApiKey(key)}` : "No Meta API key saved.");
+    };
+
+    save?.addEventListener("click", async () => {
+      const next = String(input?.value || "").trim();
+      if (!next) {
+        setStatus("Paste a Meta Model API key, then click Save.");
+        return;
+      }
+      await storageSet({ [META_API_KEY]: next });
+      if (input) input.value = "";
+      await refresh();
+      setStatus(`Saved. Current key: ${maskApiKey(next)}`);
+    });
+
+    clear?.addEventListener("click", async () => {
+      await chrome.storage.local.remove(META_API_KEY);
+      if (chrome.storage?.session) {
+        await chrome.storage.session.remove(META_API_KEY).catch(() => {});
+      }
+      if (input) input.value = "";
+      await refresh();
+    });
+
+    test?.addEventListener("click", async () => {
+      const typed = String(input?.value || "").trim();
+      const { key } = await getMetaApiKey();
+      const useKey = typed || key;
+      if (!useKey) {
+        setStatus("Save a Meta Model API key before testing.");
+        return;
+      }
+      setStatus("Testing Meta Model API key…");
+      try {
+        const res = await nativeFetch(`${META_API_BASE}/models`, {
+          headers: { Authorization: `Bearer ${useKey}`, Accept: "application/json" },
+        });
+        if (!res.ok) {
+          setStatus(`Key was rejected (${res.status}). Check the key in the Meta dashboard.`);
+          return;
+        }
+        const json = await res.json();
+        const ids = (json.data || json.models || []).map((entry) => entry.id || entry).filter(Boolean);
+        const hasMuse = ids.some((id) => String(id).includes(MUSE_MODEL_ID));
+        setStatus(
+          hasMuse
+            ? "Key works. Muse Spark 1.2 Contributor is available."
+            : "Key works. You can select Muse Spark 1.2 Contributor in the side panel.",
+        );
+      } catch (error) {
+        setStatus(`Could not reach Meta Model API: ${error.message || error}`);
+      }
+    });
+
+    refresh().catch(() => {});
+  };
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", ensurePanel, { once: true });
+  } else {
+    ensurePanel();
+  }
+}
+
+mountMetaSettingsPanel();
