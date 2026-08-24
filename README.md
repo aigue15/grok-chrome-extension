@@ -1,52 +1,39 @@
 # Grok for Chrome
 
-A Chrome side-panel browser agent powered by **Grok**, with optional **Muse Spark** models after you add a Meta API key. It can read the page, click, type, take screenshots, and work across tab groups.
+A Chrome side-panel agent that can read the page, click, type, take screenshots, and work across tabs. It is powered by **Grok**. Muse Spark is an optional add-on.
 
-This is an independent project. It is not affiliated with Anthropic, xAI, or Meta.
+This is an unofficial port of Anthropic’s [Claude for Chrome](https://chromewebstore.google.com/detail/claude/fcoeoabgfenejglbffodgkkbkcdhcgfn?hl=en-US). The UI and browser tools come from that extension. The backend talks to Grok (and optionally Meta) instead of Claude.
 
-## Sign in
+Not affiliated with Anthropic, xAI, or Meta.
 
-Sign-in is **xAI OAuth device-code** against [auth.x.ai](https://auth.x.ai) — the same public client and scopes Hermes Agent uses. Nothing is installed on the device: no API key file, no native host.
+## How to use
 
-- Client ID: `b1a00492-073a-47ea-816f-4c329264a828`
-- Scopes: `openid profile email offline_access grok-cli:access api:access`
-- API: `https://api.x.ai/v1`
-- Subscription: [SuperGrok](https://x.ai/grok) or [X Premium+](https://x.com/i/premium_sign_up)
+1. If the Chrome Web Store **Claude** extension is installed, disable it (same side-panel slot).
+2. Open `chrome://extensions`, turn on **Developer mode**, and **Load unpacked** this folder (`manifest.json`).
+3. Pin **Grok for Chrome**, open the side panel, and sign in with [SuperGrok](https://x.ai/grok) or [X Premium+](https://x.com/i/premium_sign_up).
+4. Sign in on a normal `https` page, not `chrome://`. Reload the unpacked extension after code changes.
 
-Click **Log in** in the side panel. Chrome opens an xAI / accounts.x.ai page. Approve access (enter the code if asked). Tokens stay in extension storage and refresh in the background.
+Sign-in is xAI OAuth (device code) at [auth.x.ai](https://auth.x.ai). No API key file on the device.
 
 ## Models
 
-The Models page is for Grok. Hide or show these in **chrome://extensions → Grok for Chrome → Extension options → Models**:
+**Grok** (uses your Grok sign-in):
 
-- **Grok 4.6** (default)
-- **Grok 4.5**
-- **Grok 4.3**
-- **Grok 4.2 Reasoning** (`grok-4.20-0309-reasoning`)
-- **Grok 4.2 Non-reasoning** (`grok-4.20-0309-non-reasoning`)
-- **Grok 4.2 Multi-agent** (`grok-4.20-multi-agent-0309`)
+- Grok 4.6 (default)
+- Grok 4.5
+- Grok 4.3
+- Grok 4.2 Reasoning
+- Grok 4.2 Non-reasoning
+- Grok 4.2 Multi-agent
 
-Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**.
+**Optional add-on — Meta Muse** (enable with **+** on Options → Models, then save a [Meta API key](https://dev.meta.ai/)):
 
-## Optional add-on: Meta Muse
+- Muse Spark 1.2
+- Muse Spark 1.1
+- Muse Spark 1.2 Contributor (may train future Meta models)
 
-Meta is a collapsed add-on at the bottom of Models. Click **+** to enable it, then save a key to put these in the picker:
+The picker stays Grok-only until a Meta key is saved.
 
-- **Muse Spark 1.2** (`muse-spark-1.2`) — standard tier
-- **Muse Spark 1.1** (`muse-spark-1.1`) — standard tier
-- **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — may train future Meta models
+## Support
 
-Muse models talk to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Clearing the key hides them again. Enterprise admins can also set the `metaApiKey` managed-policy field.
-
-Contributor-tier prompts and completions may be used to train future Meta models. Grok sign-in is unchanged and still used for every Grok model.
-
-## Install (unpacked)
-
-1. If the Chrome Web Store **Claude** extension is installed, disable it (same side-panel slot).
-2. Open `chrome://extensions`
-3. Enable **Developer mode**
-4. **Load unpacked** → this folder (the one that contains `manifest.json`)
-5. Pin **Grok for Chrome** and open the side panel
-6. Sign in with your Grok subscription
-
-Reload the unpacked extension on `chrome://extensions` after any code change. Sign in on a normal `https` page, not `chrome://`.
+If this is useful: [buymeacoffee.com/egedincer](https://buymeacoffee.com/egedincer)
