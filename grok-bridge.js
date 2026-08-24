@@ -2,6 +2,8 @@
  * Grok backend for this extension.
  * Same Hermes / OpenClaw xAI device-code login (auth.x.ai, no on-device key).
  * Optional Meta Muse Spark 1.2 Contributor via a Model API key in native settings.
+ * Optional Cursor OAuth (same SDK/CLI loginDeepControl flow) bills selected
+ * models to a Cursor Pro / Ultra / Teams quota.
  * The original UI, tools, and browser-control scripts stay in place.
  */
 const XAI_OAUTH_CLIENT_ID = "b1a00492-073a-47ea-816f-4c329264a828";
@@ -20,6 +22,23 @@ const MUSE_MODEL_ID = "muse-spark-1.2-contributor";
 const MUSE_MODEL_NAME = "Muse Spark 1.2 Contributor";
 const MUSE_SEND_BUDGET = 800_000;
 
+const CURSOR_WEBSITE_URL = "https://cursor.com";
+const CURSOR_BACKEND_URL = "https://api2.cursor.sh";
+const CURSOR_API_BASE = "https://api.cursor.com/v1";
+const CURSOR_DASHBOARD_KEYS_URL = "https://cursor.com/dashboard/api";
+const CURSOR_API_KEY = "cursorApiKey";
+const CURSOR_API_EMAIL = "cursorAccountEmail";
+const CURSOR_API_EXPIRES = "cursorApiKeyExpiresAt";
+const CURSOR_PREFER_QUOTA = "cursorPreferQuota";
+const CURSOR_LOGIN_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+
+const CURSOR_MODELS = [
+  { id: "cursor-auto", name: "Cursor Auto", cursorId: "auto" },
+  { id: "cursor-auto-smart", name: "Cursor Auto (Smart)", cursorId: "auto-smart" },
+  { id: "cursor-composer-2", name: "Composer 2", cursorId: "composer-2" },
+  { id: "cursor-grok-4.6", name: "Cursor Grok 4.6", cursorId: "grok-4.6" },
+];
+
 const MODELS = [
   { id: "grok-4.6", name: "Grok 4.6" },
   { id: "grok-4.5", name: "Grok 4.5" },
@@ -28,6 +47,7 @@ const MODELS = [
   { id: "grok-4.20-0309-non-reasoning", name: "Grok 4.2 Non-reasoning" },
   { id: "grok-4.20-multi-agent-0309", name: "Grok 4.2 Multi-agent" },
   { id: MUSE_MODEL_ID, name: MUSE_MODEL_NAME },
+  ...CURSOR_MODELS.map((model) => ({ id: model.id, name: model.name })),
 ];
 const DEFAULT_MODEL = "grok-4.6";
 const COMPRESS_MODEL = "grok-4.20-0309-non-reasoning";
@@ -208,9 +228,192 @@ async function getMetaApiKey() {
   return key ? { key, source: "local" } : { key: "", source: "" };
 }
 
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function sha256Base64Url(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+function randomVerifier() {
+  return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+function isCursorModel(model) {
+  const raw = String(model || "").toLowerCase();
+  return raw.startsWith("cursor-") || CURSOR_MODELS.some((entry) => entry.id === raw);
+}
+
+function cursorUpstreamId(model) {
+  const raw = String(model || "").toLowerCase();
+  const listed = CURSOR_MODELS.find((entry) => entry.id === raw);
+  if (listed) return listed.cursorId;
+  return raw.startsWith("cursor-") ? raw.slice("cursor-".length) : raw;
+}
+
+async function getCursorApiKey() {
+  try {
+    const managed = await chrome.storage?.managed?.get?.(CURSOR_API_KEY);
+    const managedKey = String(managed?.[CURSOR_API_KEY] || "").trim();
+    if (managedKey) return { key: managedKey, source: "managed" };
+  } catch {
+    /* unmanaged / no policy */
+  }
+  const stored = await storageGet([CURSOR_API_KEY, CURSOR_API_EXPIRES]);
+  const key = String(stored[CURSOR_API_KEY] || "").trim();
+  const expires = Number(stored[CURSOR_API_EXPIRES] || 0);
+  if (key && expires && Date.now() > expires) {
+    await chrome.storage.local.remove([CURSOR_API_KEY, CURSOR_API_EMAIL, CURSOR_API_EXPIRES]).catch(() => {});
+    return { key: "", source: "" };
+  }
+  return key ? { key, source: "local" } : { key: "", source: "" };
+}
+
+async function getCursorPreferQuota() {
+  const stored = await storageGet([CURSOR_PREFER_QUOTA]);
+  return stored[CURSOR_PREFER_QUOTA] === true;
+}
+
+function cursorAuthHeaders(key) {
+  return {
+    Authorization: `Bearer ${key}`,
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+}
+
+async function fetchCursorMe(key) {
+  const res = await nativeFetch(`${CURSOR_API_BASE}/me`, {
+    headers: cursorAuthHeaders(key),
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok) {
+    throw new Error(json?.message || text || `Cursor /v1/me failed (${res.status})`);
+  }
+  return json || {};
+}
+
+async function mintCursorUserApiKey(accessToken) {
+  const expiresAtMs = Date.now() + CURSOR_LOGIN_TTL_MS;
+  const res = await nativeFetch(`${CURSOR_BACKEND_URL}/aiserver.v1.DashboardService/CreateUserApiKey`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "Connect-Protocol-Version": "1",
+    },
+    body: JSON.stringify({
+      name: "Grok for Chrome",
+      expiresAt: String(expiresAtMs),
+    }),
+  });
+  const text = await res.text();
+  let json = null;
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    /* ignore */
+  }
+  const apiKey = json?.apiKey || json?.api_key || json?.key;
+  if (!res.ok || !apiKey) {
+    throw new Error(
+      json?.message ||
+        text ||
+        "Cursor login worked, but creating an API key failed. Paste a key from cursor.com/dashboard/api.",
+    );
+  }
+  return { apiKey, expiresAtMs };
+}
+
+async function pollCursorLogin({ uuid, verifier }) {
+  const deadline = Date.now() + 20 * 60 * 1000;
+  let delay = 1000;
+  let useGet = false;
+  let errors = 0;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    delay = Math.min(Math.round(delay * 1.2), 10_000);
+    const res = useGet
+      ? await nativeFetch(
+          `${CURSOR_BACKEND_URL}/auth/poll?uuid=${encodeURIComponent(uuid)}&verifier=${encodeURIComponent(verifier)}`,
+          { headers: { Accept: "application/json" } },
+        )
+      : await nativeFetch(`${CURSOR_BACKEND_URL}/auth/poll`, {
+          method: "POST",
+          headers: { Accept: "application/json", "Content-Type": "application/json" },
+          body: JSON.stringify({ uuid, verifier }),
+        });
+    if (res.status === 404) {
+      if (!useGet) {
+        const body = (await res.text()).trim();
+        if (body && body !== "Not found") useGet = true;
+      }
+      continue;
+    }
+    if (!res.ok) {
+      errors += 1;
+      if (errors >= 3) throw new Error(`Cursor login poll failed (${res.status})`);
+      continue;
+    }
+    const json = await res.json();
+    if (json?.accessToken && json?.refreshToken) return json;
+    throw new Error("Cursor login poll returned an unexpected payload.");
+  }
+  throw new Error("Timed out waiting for Cursor authorization.");
+}
+
+async function runCursorLogin() {
+  const verifier = randomVerifier();
+  const challenge = await sha256Base64Url(verifier);
+  const uuid = crypto.randomUUID();
+  const loginUrl =
+    `${CURSOR_WEBSITE_URL}/loginDeepControl?challenge=${encodeURIComponent(challenge)}` +
+    `&uuid=${encodeURIComponent(uuid)}&mode=login&redirectTarget=sdk`;
+  if (chrome.tabs?.create) {
+    await chrome.tabs.create({ url: loginUrl, active: true });
+  } else {
+    globalThis.open?.(loginUrl, "_blank", "noopener,noreferrer");
+  }
+  if (chrome.notifications?.create) {
+    chrome.notifications.create({
+      type: "basic",
+      iconUrl: "icon-128.png",
+      title: "Sign in with Cursor",
+      message: "Approve access in the Cursor tab that just opened.",
+    });
+  }
+  const tokens = await pollCursorLogin({ uuid, verifier });
+  const minted = await mintCursorUserApiKey(tokens.accessToken);
+  let email = "";
+  try {
+    const me = await fetchCursorMe(minted.apiKey);
+    email = me.userEmail || me.email || "";
+  } catch {
+    /* key still usable */
+  }
+  await storageSet({
+    [CURSOR_API_KEY]: minted.apiKey,
+    [CURSOR_API_EMAIL]: email,
+    [CURSOR_API_EXPIRES]: minted.expiresAtMs,
+  });
+  return { apiKey: minted.apiKey, email, apiKeyExpiresAtMs: minted.expiresAtMs };
+}
+
 function mapModel(model) {
   const raw = String(model || "").toLowerCase();
   if (MODELS.some((entry) => entry.id === raw)) return raw;
+  if (isCursorModel(raw)) return raw.startsWith("cursor-") ? raw : `cursor-${raw}`;
   if (isMuseModel(raw)) return MUSE_MODEL_ID;
   if (raw.includes("multi-agent") || raw.includes("grok-4.20-multi")) {
     return "grok-4.20-multi-agent-0309";
@@ -443,6 +646,23 @@ function museProfile(uuid) {
   };
 }
 
+function cursorProfile(uuid, email) {
+  return {
+    account: {
+      uuid,
+      email: email || "cursor@cursor.com",
+      display_name: email || "Cursor",
+      has_claude_max: true,
+      has_claude_pro: true,
+    },
+    organization: {
+      uuid,
+      name: "Cursor",
+      organization_type: "claude_max",
+    },
+  };
+}
+
 async function grokProfile() {
   const stored = await storageGet([
     TOKEN_KEYS.ACCOUNT,
@@ -453,6 +673,15 @@ async function grokProfile() {
     "grokAuth",
   ]);
   if (!stored[TOKEN_KEYS.ACCESS] && !stored[TOKEN_KEYS.REFRESH]) {
+    const cursor = await getCursorApiKey();
+    if (cursor.key) {
+      const extra = await storageGet([CURSOR_API_EMAIL, STABLE_ACCOUNT_KEY]);
+      const uuid = extra[STABLE_ACCOUNT_KEY] || stored[STABLE_ACCOUNT_KEY] || crypto.randomUUID();
+      if (uuid !== stored[STABLE_ACCOUNT_KEY]) {
+        await storageSet({ [STABLE_ACCOUNT_KEY]: uuid });
+      }
+      return cursorProfile(uuid, extra[CURSOR_API_EMAIL]);
+    }
     const { key } = await getMetaApiKey();
     if (key) {
       const uuid = stored[STABLE_ACCOUNT_KEY] || crypto.randomUUID();
@@ -982,15 +1211,293 @@ function wrapAnthropicSseFromOpenAIStream(stream, model) {
   });
 }
 
+function conversationToCursorPrompt(body) {
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const toolLines = tools
+    .map((tool) => {
+      const name = tool.name || tool.function?.name || "tool";
+      const description = tool.description || tool.function?.description || "";
+      const schema = tool.input_schema || tool.function?.parameters || {};
+      return `- ${name}: ${description}\n  input_schema: ${JSON.stringify(schema)}`;
+    })
+    .join("\n");
+  const history = [];
+  const system = typeof body.system === "string" ? body.system : contentToText(body.system);
+  if (system) history.push(`SYSTEM:\n${system}`);
+  for (const message of body.messages || []) {
+    const role = String(message.role || "user").toUpperCase();
+    const text = contentToText(message.content);
+    if (text) history.push(`${role}:\n${text}`);
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        if (part?.type === "tool_use") {
+          history.push(`ASSISTANT TOOL CALL ${part.name}:\n${JSON.stringify(part.input ?? {})}`);
+        }
+        if (part?.type === "tool_result") {
+          const result =
+            typeof part.content === "string" ? part.content : JSON.stringify(part.content ?? "");
+          history.push(`TOOL RESULT (${part.tool_use_id || "unknown"}):\n${clipString(result, 24_000)}`);
+        }
+      }
+    }
+  }
+  return `You are a Chrome browser agent running through Cursor. You cannot read files, use git, or run a shell. Control the user's real browser with the tools listed below.
+
+${
+  toolLines
+    ? `Available browser tools:\n${toolLines}\n\nReply with ONLY one JSON object, no markdown fences:\n{"action":"tools","calls":[{"id":"toolu_1","name":"tool_name","input":{}}]}\nor\n{"action":"reply","text":"your answer"}\n`
+    : "Reply with ONLY one JSON object:\n{\"action\":\"reply\",\"text\":\"your answer\"}\n"
+}
+
+Conversation so far:
+${history.join("\n\n") || "(empty)"}`;
+}
+
+function parseCursorAgentReply(text) {
+  const raw = String(text || "").trim();
+  const unfenced = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+  const start = unfenced.indexOf("{");
+  const end = unfenced.lastIndexOf("}");
+  const candidate = start >= 0 && end > start ? unfenced.slice(start, end + 1) : unfenced;
+  try {
+    const json = JSON.parse(candidate);
+    if (json?.action === "tools" && Array.isArray(json.calls) && json.calls.length) {
+      return {
+        kind: "tools",
+        calls: json.calls.map((call, index) => ({
+          id: call.id || `toolu_${index + 1}`,
+          name: call.name || "",
+          input: call.input ?? {},
+        })),
+      };
+    }
+    if (json?.action === "reply" && typeof json.text === "string") {
+      return { kind: "reply", text: json.text };
+    }
+  } catch {
+    /* plain text */
+  }
+  return { kind: "reply", text: raw };
+}
+
+function anthropicMessageFromCursorReply(parsed, model) {
+  const content =
+    parsed.kind === "tools"
+      ? parsed.calls.map((call) => ({
+          type: "tool_use",
+          id: call.id,
+          name: call.name,
+          input: call.input,
+        }))
+      : [{ type: "text", text: parsed.text || "" }];
+  return {
+    id: `msg_${crypto.randomUUID()}`,
+    type: "message",
+    role: "assistant",
+    model,
+    content,
+    stop_reason: parsed.kind === "tools" ? "tool_use" : "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 0, output_tokens: 0 },
+  };
+}
+
+function wrapAnthropicSseFromCursorReply(parsed, model) {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      const send = (event, data) => {
+        controller.enqueue(encoder.encode(sseEncode(event, data)));
+      };
+      const message = anthropicMessageFromCursorReply(parsed, model);
+      send("message_start", {
+        type: "message_start",
+        message: {
+          id: message.id,
+          type: "message",
+          role: "assistant",
+          model,
+          content: [],
+          stop_reason: null,
+          stop_sequence: null,
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+      });
+      message.content.forEach((block, index) => {
+        send("content_block_start", {
+          type: "content_block_start",
+          index,
+          content_block:
+            block.type === "tool_use"
+              ? { type: "tool_use", id: block.id, name: block.name, input: {} }
+              : { type: "text", text: "" },
+        });
+        if (block.type === "tool_use") {
+          send("content_block_delta", {
+            type: "content_block_delta",
+            index,
+            delta: { type: "input_json_delta", partial_json: JSON.stringify(block.input ?? {}) },
+          });
+        } else {
+          send("content_block_delta", {
+            type: "content_block_delta",
+            index,
+            delta: { type: "text_delta", text: block.text || "" },
+          });
+        }
+        send("content_block_stop", { type: "content_block_stop", index });
+      });
+      send("message_delta", {
+        type: "message_delta",
+        delta: { stop_reason: message.stop_reason, stop_sequence: null },
+        usage: { output_tokens: 0 },
+      });
+      send("message_stop", { type: "message_stop" });
+      controller.close();
+    },
+  });
+}
+
+async function readCursorRunText(key, agentId, runId) {
+  const res = await nativeFetch(`${CURSOR_API_BASE}/agents/${agentId}/runs/${runId}/stream`, {
+    headers: {
+      Authorization: `Bearer ${key}`,
+      Accept: "text/event-stream",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Cursor run stream failed (${res.status})`);
+  }
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let eventName = "";
+  let assistant = "";
+  let resultText = "";
+  const reader = res.body.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        eventName = "";
+        continue;
+      }
+      if (trimmed.startsWith("event:")) {
+        eventName = trimmed.slice(6).trim();
+        continue;
+      }
+      if (!trimmed.startsWith("data:")) continue;
+      const payload = trimmed.slice(5).trim();
+      if (!payload) continue;
+      let json = null;
+      try {
+        json = JSON.parse(payload);
+      } catch {
+        continue;
+      }
+      if (eventName === "assistant" && json.text) assistant += json.text;
+      if (eventName === "result" && json.text) resultText = json.text;
+      if (eventName === "error") {
+        throw new Error(json.message || "Cursor run error");
+      }
+    }
+  }
+  return resultText || assistant;
+}
+
+async function proxyCursorMessages(body, model, key, stream) {
+  const cursorModel = cursorUpstreamId(model);
+  const payload = {
+    name: "Grok for Chrome",
+    prompt: { text: conversationToCursorPrompt(body) },
+    model: { id: cursorModel },
+  };
+  if (cursorModel === "auto-smart") {
+    payload.model.params = [{ id: "optimize_for", value: "balanced" }];
+  }
+  const created = await nativeFetch(`${CURSOR_API_BASE}/agents`, {
+    method: "POST",
+    headers: cursorAuthHeaders(key),
+    body: JSON.stringify(payload),
+  });
+  const createdText = await created.text();
+  let createdJson = null;
+  try {
+    createdJson = createdText ? JSON.parse(createdText) : null;
+  } catch {
+    /* ignore */
+  }
+  if (!created.ok) {
+    return jsonResponse(
+      {
+        type: "error",
+        error: {
+          type: "api_error",
+          message: createdJson?.message || createdText || `Cursor API ${created.status}`,
+        },
+      },
+      created.status,
+    );
+  }
+  const agentId = createdJson?.agent?.id;
+  const runId = createdJson?.run?.id || createdJson?.agent?.latestRunId;
+  if (!agentId || !runId) {
+    return jsonResponse(
+      { type: "error", error: { type: "api_error", message: "Cursor did not return an agent run." } },
+      502,
+    );
+  }
+  try {
+    const text = await readCursorRunText(key, agentId, runId);
+    const parsed = parseCursorAgentReply(text);
+    if (stream) {
+      return new Response(wrapAnthropicSseFromCursorReply(parsed, model), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
+      });
+    }
+    return jsonResponse(anthropicMessageFromCursorReply(parsed, model));
+  } finally {
+    nativeFetch(`${CURSOR_API_BASE}/agents/${agentId}/archive`, {
+      method: "POST",
+      headers: cursorAuthHeaders(key),
+      body: "{}",
+    }).catch(() => {});
+  }
+}
+
 async function proxyMessages(init) {
   const raw = typeof init?.body === "string" ? init.body : await new Response(init?.body).text();
   const body = raw ? JSON.parse(raw) : {};
   const model = mapModel(body.model);
   const muse = isMuseModel(model);
+  const cursorKey = await getCursorApiKey();
+  const preferCursor = await getCursorPreferQuota();
+  const useCursor = isCursorModel(model) || (preferCursor && Boolean(cursorKey.key) && !muse);
   let token = "";
   let apiBase = XAI_API_BASE;
   let apiLabel = "Grok API";
   let sendBudget = GROK_SEND_BUDGET;
+
+  if (useCursor) {
+    if (!cursorKey.key) {
+      return jsonResponse(
+        {
+          error: {
+            type: "authentication_error",
+            message: "Sign in with Cursor in extension settings to use Cursor quota.",
+          },
+        },
+        401,
+      );
+    }
+    return proxyCursorMessages(body, model, cursorKey.key, Boolean(body.stream));
+  }
 
   if (muse) {
     const { key } = await getMetaApiKey();
@@ -1494,6 +2001,19 @@ if (chrome.runtime?.onMessage) {
         .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
       return true;
     }
+    if (message?.type === "cursor_login") {
+      runCursorLogin()
+        .then((result) => sendResponse({ ok: true, ...result }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
+    if (message?.type === "cursor_logout") {
+      chrome.storage.local
+        .remove([CURSOR_API_KEY, CURSOR_API_EMAIL, CURSOR_API_EXPIRES])
+        .then(() => sendResponse({ ok: true }))
+        .catch((error) => sendResponse({ ok: false, error: String(error.message || error) }));
+      return true;
+    }
   });
 }
 
@@ -1517,6 +2037,31 @@ function mountMetaSettingsPanel() {
     panel.className = "px-6 pt-6";
     panel.innerHTML = `
       <div class="max-w-2xl mx-auto">
+        <h2 class="text-text-100 font-xl-bold">Cursor account</h2>
+        <p class="text-text-300 font-base mt-2 mb-6">
+          Sign in with Cursor (same browser OAuth the Cursor SDK / CLI uses) to bill selected models to your
+          Cursor Pro, Ultra, or Teams quota. You can also paste a user API key from the
+          <a class="inline-link hover:text-brand-100" href="${CURSOR_DASHBOARD_KEYS_URL}" target="_blank" rel="noopener noreferrer">Cursor API keys dashboard</a>.
+        </p>
+        <p id="cursor-auth-status" class="text-text-400 font-base-sm mt-2"></p>
+        <label class="font-semibold text-text-200" for="cursor-api-key-input">API key (optional)</label>
+        <input
+          id="cursor-api-key-input"
+          type="password"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="crsr_…"
+          class="mt-2 w-full rounded-xl border border-border-300 bg-bg-000 px-3 py-2 text-text-100 font-base"
+        />
+        <label class="flex items-center gap-2 mt-4 text-text-200 font-base">
+          <input id="cursor-prefer-quota" type="checkbox" />
+          Use Cursor quota for Grok models too (not just Cursor Auto / Composer)
+        </label>
+        <div class="flex items-center gap-3 mt-4 mb-6">
+          <button id="cursor-login" type="button" class="px-4 py-2 rounded-lg bg-brand-100 text-bg-000 font-semibold">Sign in with Cursor</button>
+          <button id="cursor-key-save" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Save key</button>
+          <button id="cursor-logout" type="button" class="px-4 py-2 rounded-lg hover:bg-bg-200 transition-colors text-text-100 font-semibold">Sign out</button>
+        </div>
         <h2 class="text-text-100 font-xl-bold">Meta Model API</h2>
         <p class="text-text-300 font-base mt-2 mb-6">
           Optional. Paste a key from the
@@ -1543,11 +2088,52 @@ function mountMetaSettingsPanel() {
     `;
     host.prepend(panel);
 
+    const cursorStatus = panel.querySelector("#cursor-auth-status");
+    const cursorInput = panel.querySelector("#cursor-api-key-input");
+    const cursorPrefer = panel.querySelector("#cursor-prefer-quota");
+    const cursorLogin = panel.querySelector("#cursor-login");
+    const cursorSave = panel.querySelector("#cursor-key-save");
+    const cursorLogout = panel.querySelector("#cursor-logout");
     const input = panel.querySelector("#meta-api-key-input");
     const status = panel.querySelector("#meta-api-key-status");
     const save = panel.querySelector("#meta-api-key-save");
     const clear = panel.querySelector("#meta-api-key-clear");
     const test = panel.querySelector("#meta-api-key-test");
+
+    const setCursorStatus = (text) => {
+      if (cursorStatus) cursorStatus.textContent = text;
+    };
+
+    const refreshCursor = async () => {
+      const { key, source } = await getCursorApiKey();
+      const extra = await storageGet([CURSOR_API_EMAIL, CURSOR_PREFER_QUOTA]);
+      if (cursorPrefer) cursorPrefer.checked = extra[CURSOR_PREFER_QUOTA] === true;
+      if (source === "managed") {
+        if (cursorInput) {
+          cursorInput.value = key;
+          cursorInput.disabled = true;
+        }
+        if (cursorSave) cursorSave.disabled = true;
+        if (cursorLogin) cursorLogin.disabled = true;
+        if (cursorLogout) cursorLogout.disabled = true;
+        setCursorStatus("This Cursor key is set by organization policy and cannot be edited here.");
+        return;
+      }
+      if (cursorInput) {
+        cursorInput.disabled = false;
+        cursorInput.value = "";
+        cursorInput.placeholder = key ? maskApiKey(key) : "crsr_…";
+      }
+      if (cursorSave) cursorSave.disabled = false;
+      if (cursorLogin) cursorLogin.disabled = false;
+      if (cursorLogout) cursorLogout.disabled = !key;
+      if (!key) {
+        setCursorStatus("Not signed in to Cursor. Grok OAuth still works as before.");
+        return;
+      }
+      const email = extra[CURSOR_API_EMAIL] || "";
+      setCursorStatus(email ? `Signed in as ${email}. Key: ${maskApiKey(key)}` : `Cursor key saved: ${maskApiKey(key)}`);
+    };
 
     const setStatus = (text) => {
       if (status) status.textContent = text;
@@ -1574,6 +2160,54 @@ function mountMetaSettingsPanel() {
       if (clear) clear.disabled = !key;
       setStatus(key ? `Saved locally. Current key: ${maskApiKey(key)}` : "No Meta API key saved.");
     };
+
+    cursorLogin?.addEventListener("click", async () => {
+      setCursorStatus("Waiting for Cursor authorization in the opened tab…");
+      try {
+        const result = await runCursorLogin();
+        await refreshCursor();
+        setCursorStatus(
+          result.email
+            ? `Signed in as ${result.email}. Usage will count against your Cursor quota.`
+            : "Signed in with Cursor. Usage will count against your Cursor quota.",
+        );
+      } catch (error) {
+        setCursorStatus(String(error.message || error));
+      }
+    });
+
+    cursorSave?.addEventListener("click", async () => {
+      const next = String(cursorInput?.value || "").trim();
+      if (!next) {
+        setCursorStatus("Paste a Cursor user API key, then click Save key.");
+        return;
+      }
+      try {
+        const me = await fetchCursorMe(next);
+        await storageSet({
+          [CURSOR_API_KEY]: next,
+          [CURSOR_API_EMAIL]: me.userEmail || me.email || "",
+          [CURSOR_API_EXPIRES]: 0,
+        });
+        if (cursorInput) cursorInput.value = "";
+        await refreshCursor();
+      } catch (error) {
+        setCursorStatus(`Cursor key was rejected: ${error.message || error}`);
+      }
+    });
+
+    cursorLogout?.addEventListener("click", async () => {
+      await chrome.storage.local.remove([CURSOR_API_KEY, CURSOR_API_EMAIL, CURSOR_API_EXPIRES]);
+      if (chrome.storage?.session) {
+        await chrome.storage.session.remove([CURSOR_API_KEY, CURSOR_API_EMAIL, CURSOR_API_EXPIRES]).catch(() => {});
+      }
+      if (cursorInput) cursorInput.value = "";
+      await refreshCursor();
+    });
+
+    cursorPrefer?.addEventListener("change", async () => {
+      await storageSet({ [CURSOR_PREFER_QUOTA]: Boolean(cursorPrefer.checked) });
+    });
 
     save?.addEventListener("click", async () => {
       const next = String(input?.value || "").trim();
@@ -1626,6 +2260,7 @@ function mountMetaSettingsPanel() {
       }
     });
 
+    refreshCursor().catch(() => {});
     refresh().catch(() => {});
   };
 

@@ -14,6 +14,11 @@
       "description": "Restricts which Anthropic organization(s) the extension can be used with. Accepts either a single UUID string or a JSON-encoded array of UUID strings. If the signed-in user's organization is not in this list, the extension shows a blocking page with a log out button.",
       "type": "string"
     },
+    "cursorApiKey": {
+      "title": "Cursor user API key",
+      "description": "User API key from cursor.com/dashboard/api. When set, Cursor Auto / Composer / Cursor Grok models (and Grok models if the user enables Cursor quota) bill to this Cursor subscription. Overrides a key saved on the extension options page.",
+      "type": "string"
+    },
     "metaApiKey": {
       "title": "Meta Model API key",
       "description": "API key for Meta Muse Spark 1.2 Contributor (api.meta.ai). Create a key in the Meta Model API dashboard. When this policy is set, it overrides the key saved on the extension options page. Contributor-tier prompts and completions may be used to train future Meta models.",
