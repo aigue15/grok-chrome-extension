@@ -23,8 +23,15 @@ The model picker offers:
 - **Grok 4.2 Reasoning** (`grok-4.20-0309-reasoning`)
 - **Grok 4.2 Non-reasoning** (`grok-4.20-0309-non-reasoning`)
 - **Grok 4.2 Multi-agent** (`grok-4.20-multi-agent-0309`)
+- **Muse Spark 1.2 Contributor** (`muse-spark-1.2-contributor`) — Meta Model API key required
 
-Long-thread compression uses **Grok 4.2 Non-reasoning**.
+Long-thread compression for Grok uses **Grok 4.2 Non-reasoning**. Muse uses Meta's 1M-token context and local clipping instead.
+
+## Meta Muse API key
+
+Muse Spark 1.2 Contributor talks to `https://api.meta.ai/v1` with a key you create in the [Meta Model API dashboard](https://dev.meta.ai/). Open the extension **Options** page (chrome://extensions → Grok → Details → Extension options) and paste the key there. Enterprise admins can also set the `metaApiKey` managed-policy field.
+
+Contributor-tier prompts and completions may be used to train future Meta models. Grok sign-in is unchanged and still used for every Grok model.
 
 ## Install (unpacked)
 
